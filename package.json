@@ -1,0 +1,27 @@
+{
+	"name": "tminiwebserveres",
+	"version": "1.0.0",
+	"description": "Raspberry Pi Pico W用に作成したコンパクトなWebServerです。\r MicroPythonの環境で動作して、asyncio (uasyncio)を利用して実装しています。",
+	"keywords": [
+		"websocket"
+	],
+	"homepage": "https://github.com/ryunosinfx/TMiniWebServerES#readme",
+	"bugs": {
+		"url": "https://github.com/ryunosinfx/TMiniWebServerES/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ryunosinfx/TMiniWebServerES.git"
+	},
+	"license": "MIT",
+	"author": "",
+	"type": "module",
+	"main": "index.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"devDependencies": {
+		"eslint": "^9.38.0",
+		"eslint-plugin-jsdoc": "^61.1.7"
+	}
+}
