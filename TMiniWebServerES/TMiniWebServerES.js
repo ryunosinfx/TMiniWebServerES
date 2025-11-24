@@ -26,6 +26,8 @@ export class TMiniWebServerES {
 	 * @param {function} routFunc
 	 * @returns
 	 */
+	static L = L;
+	static servers = {};
 	static route = (urlPath, method, routFunc) =>
 		ROUT_HEADERS.push({
 			urlPath,
@@ -64,11 +66,13 @@ export class TMiniWebServerES {
 		}
 	}
 	constructor(port = 8080, bindIP = '0.0.0.0', wwwroot = '/wwwroot') {
+		if (TMiniWebServerES.servers[port]) return L.log(`[ERROR] 既にそのポート${port}で起動中です`);
 		this.serverIp = bindIP;
 		this.port = port;
 		this._wwwroot = wwwroot;
 		this.isRunning = false;
 		this.routeHeaders = [];
+		TMiniWebServerES.servers[port] = true;
 		TMiniWebServerES.addRouteItem(ROUT_HEADERS, this.routeHeaders);
 	}
 	static deleteExpireConns = a => {
@@ -95,7 +99,7 @@ export class TMiniWebServerES {
 		if (this.isStarted()) return;
 		const a = {};
 		const server = net.createServer(socket => {
-			L.dlog('client connected'); // 'connection' listener.
+			L.dlog('client connected at ' + socket.localAddress); // 'connection' listener.
 			const client = new TMiniWebClient(socket, this);
 			const key = `${Date.now()}/${Math.random()}`;
 			a[key] = client;

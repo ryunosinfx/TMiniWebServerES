@@ -142,5 +142,13 @@ TMiniWebServerES.withWS('/ws/chat/<roomId>', async (websocket, u8a, routeArgs) =
 		console.error(e);
 	}
 });
-// Server Start
-new TMiniWebServerES(8080, '0.0.0.0', '../wwwroot').start(); //TMiniWebServerES().start();
+export class SampleServer {
+	static L = TMiniWebServerES.L;
+	static start() {
+		// Server Start
+		new TMiniWebServerES(8080, '0.0.0.0', '../wwwroot').start(); //TMiniWebServerES().start();
+	}
+}
+
+if (process && Array.isArray(process.argv) && process.argv.length > 2 && process.argv[2] === 'start')
+	SampleServer.start();
