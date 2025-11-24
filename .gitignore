@@ -4,3 +4,4 @@ laninfo.txt
 
 node_modules
 ./node_modules/*
+bundle.js

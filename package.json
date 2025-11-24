@@ -18,10 +18,18 @@
 	"type": "module",
 	"main": "index.js",
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"server": "cd ./TMiniWebServerES;node ./SampleServer.js start",
+		"wwwload": "for f in `ls ./wwwroot/*`; do kaluma put ${f} /${f};done",
+		"flashTest": "kaluma flash index.js",
+		"flashWifi": "kaluma flash wifiTest.js",
+		"flash": "kaluma flash bundle.js",
+		"build": "rollup ./TMiniWebServerES/main.js --file bundle.js -f cjs"
 	},
 	"devDependencies": {
+		"@kaluma/cli": "^1.4.0",
 		"eslint": "^9.38.0",
-		"eslint-plugin-jsdoc": "^61.1.7"
+		"eslint-plugin-jsdoc": "^61.1.7",
+		"rollup": "^4.53.2"
 	}
 }
