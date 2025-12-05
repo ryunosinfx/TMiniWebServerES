@@ -20,11 +20,17 @@
 	"scripts": {
 		"test": "echo \"Error: no test specified\" && exit 1",
 		"server": "cd ./TMiniWebServerES;node ./SampleServer.js start",
+		"serverSample": "cd ./TMiniWebServerES;node ../bundleSample.cjs start",
 		"wwwload": "for f in `ls ./wwwroot/*`; do kaluma put ${f} /${f};done",
+		"wwwloade": "for f in `ls ./wwwroot/*`; do echo ${f};done",
+		"wwwloadi": "kaluma put ./wwwroot/index.html /index.html",
+		"wwwloadv": "kaluma put ./wwwroot/Vw.js /Vw.js",
 		"flashTest": "kaluma flash index.js",
 		"flashWifi": "kaluma flash wifiTest.js",
 		"flash": "kaluma flash bundle.js",
-		"build": "rollup ./TMiniWebServerES/main.js --file bundle.js -f cjs"
+		"build": "rollup ./TMiniWebServerES/main.js --file bundle.js -f cjs",
+		"buildSample": "rollup ./TMiniWebServerES/SampleServer.js --file bundleSample.cjs -f cjs",
+		"build_flash": "rollup ./TMiniWebServerES/main.js --file bundle.js -f cjs;kaluma flash bundle.js"
 	},
 	"devDependencies": {
 		"@kaluma/cli": "^1.4.0",
