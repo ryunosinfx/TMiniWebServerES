@@ -2,23 +2,17 @@ import net from 'net';
 import { TMiniWebServerUtil, HttpStatusCode, Y } from './TMiniWebServerUtil.js';
 import { L, D } from './Utils.js';
 import { SHA1 } from './sha1.min.js';
-const U = TMiniWebServerUtil;
-const EMPTY = '';
-const GET = 'GET';
-const WS = 'websocket';
-const INDEX_FILES = ['index.html', 'index.htm'];
-const ACCEPTABLE_TYPE = ['string', 'number'];
-const MAX_CONN = 10;
-const EXPIRE_DURATION = 24 * 60 * 60 * 1000;
-const TMP_ARR = [];
-
-// class L {
-// 	static isDebug = 1;
-// 	static log = (msg, objects = EMPTY) => console.log(`[log] ${msg}`, objects);
-// 	static dlog = (msg, objects = EMPTY) => (L.isDebug ? console.log(`[debug] ${msg}`, objects) : null);
-// }
-const ROUT_HEADERS = [];
-const SERVERS = {};
+const U = TMiniWebServerUtil,
+	EMPTY = '',
+	GET = 'GET',
+	WS = 'websocket',
+	INDEX_FILES = ['index.html', 'index.htm'],
+	AT = ['string', 'number'],
+	MAX_CONN = 10,
+	EXPIRE_DURATION = 24 * 60 * 60 * 1000,
+	TMP_ARR = [],
+	ROUT_HEADERS = [],
+	SERVERS = {};
 export const TMWS = {
 	route: (urlPath, method, routFunc) =>
 		ROUT_HEADERS.push({
@@ -29,48 +23,48 @@ export const TMWS = {
 	withWS: (urlPath, routFunc) => ROUT_HEADERS.push({ urlPath, method: WS, routFunc }),
 	addRouteItem: (sourceDecorators, currentRouteHeaders) => {
 		for (const { urlPath, method, routFunc } of sourceDecorators) {
-			const routeParts = urlPath.split('/');
-			const routeArgNames = [];
-			const routeRegexes = TMP_ARR;
-			for (const s of routeParts) {
+			const rPs = urlPath.split('/'),
+				rAN = [],
+				rRs = TMP_ARR;
+			for (const s of rPs) {
 				const j = s.split(EMPTY);
 				if (j.shift() === '<' && j.pop() === '>') {
-					routeArgNames.push(j.join(EMPTY));
-					routeRegexes.push('/([-\\._0-9a-zA-Z%]*)');
+					rAN.push(j.join(EMPTY));
+					rRs.push('/([-\\._0-9a-zA-Z%]*)');
 				} else if (s) {
-					routeRegexes.push('/');
-					routeRegexes.push(s);
+					rRs.push('/');
+					rRs.push(s);
 				}
 			}
-			routeRegexes.push('$');
-			const routeRegex = new RegExp(routeRegexes.join(EMPTY));
+			rRs.push('$');
+			const routeRegex = new RegExp(rRs.join(EMPTY));
 			currentRouteHeaders.push({
 				route: urlPath,
 				method: method.toUpperCase(),
 				routFunc,
-				routeArgNames,
+				routeArgNames: rAN,
 				routeRegex,
 			});
-			D(`at addRouteItem: route add: urlPath:${urlPath} -> regex: ${routeRegexes.join(EMPTY)}, ${routeArgNames}`);
-			routeRegexes.splice(0, routeRegexes.length);
+			D(`at addRouteItem: route add: urlPath:${urlPath} -> regex: ${rRs.join(EMPTY)}, ${rAN}`);
+			rRs.splice(0, rRs.length);
 		}
 	},
 	deleteExpireConns: a => {
-		const keys = Object.keys(a);
-		keys.sort();
-		const l = keys.length;
+		const ks = Object.keys(a);
+		ks.sort();
+		const l = ks.length;
 		if (l > MAX_CONN)
 			for (let i = MAX_CONN; i < l; i++) {
-				const key = keys[i];
-				const client = a[key];
-				client.destroy();
-				delete a[key];
+				const k = ks[i],
+					c = a[k];
+				c.destroy();
+				delete a[k];
 			}
 		const limit = Date.now() - EXPIRE_DURATION;
 		Object.keys(a).forEach(key => {
-			const client = a[key];
-			if (client && client.spawnTime < limit) {
-				client.destroy();
+			const c = a[key];
+			if (c && c.spawnTime < limit) {
+				c.destroy();
 				delete a[key];
 			}
 		});
@@ -87,43 +81,45 @@ export class TMiniWebServerES {
 	 */
 	constructor(port = 8080, bindIP = '0.0.0.0', wwwroot = '/wwwroot') {
 		if (SERVERS[port]) return L(`[ERROR] 既にそのポート${port}で起動中です`);
-		this.serverIp = bindIP;
-		this.port = port;
-		this._wwwroot = wwwroot;
-		this.isRunning = false;
-		this.routeHeaders = [];
+		const z = this;
+		z.serverIp = bindIP;
+		z.port = port;
+		z._wwwroot = wwwroot;
+		z.isRunning = false;
+		z.routeHeaders = [];
 		SERVERS[port] = true;
-		TMWS.addRouteItem(ROUT_HEADERS, this.routeHeaders);
+		TMWS.addRouteItem(ROUT_HEADERS, z.routeHeaders);
 	}
 	async start() {
 		if (this.isStarted()) return;
-		const a = {};
-		const server = net.createServer(socket => {
-			D(`client connected at ${socket.localAddress}`); // 'connection' listener.
-			const client = new TMiniWebClient(socket, this);
-			const key = `${Date.now()}/${Math.random()}`;
-			a[key] = client;
-			socket.on('data', u8a => client._processRequest(u8a));
-			socket.on('end', evt => L('end event:', evt) && client.onEnd());
-			socket.on('close', evt => L('close event:', evt) && TMWS.deleteExpireConns(a) && client.onClose(evt));
-			socket.on('drain', evt => L('drain event:', evt) && client.onDrain());
-			L(`writableLength:${socket.writableLength} writableNeedDrain:${socket.writableNeedDrain}`);
-			try {
-				L(`at serverProc:connected by ${socket.remoteAddress ? socket.remoteAddress : EMPTY}`);
-			} catch (ex) {
-				L(`[ERROR]at serverProc:process request failed.`, ex);
-			}
-		});
-		server.on('error', err => {
+		const z = this,
+			a = {},
+			svr = net.createServer(s => {
+				D(`client connected at ${s.localAddress}`); // 'connection' listener.
+				const c = new TMiniWebClient(s, z),
+					k = `${Date.now()}/${Math.random()}`;
+				a[k] = c;
+				s.on('data', u8a => c._processRequest(u8a));
+				s.on('end', evt => L('end event:', evt) && c.onEnd());
+				s.on('close', evt => L('close event:', evt) && TMWS.deleteExpireConns(a) && c.onClose(evt));
+				s.on('drain', evt => L('drain event:', evt) && c.onDrain());
+				L(`writableLength:${s.writableLength} writableNeedDrain:${s.writableNeedDrain}`);
+				try {
+					L(`at serverProc:connected by ${s.remoteAddress ? s.remoteAddress : EMPTY}`);
+				} catch (ex) {
+					L(`[ERROR]at serverProc:process request failed.`, ex);
+				}
+			});
+		svr.on('error', err => {
 			L('[ERROR] at server:', err);
 			throw err;
 		});
-		server.on('end', evt => L('srv end event:', evt));
-		server.on('close', evt => L('srv close event:', evt));
-		server.listen(this.port, () => L('server START port:', this.port));
-		this._server = server;
-		this.isRunning = true;
-		L(`start server on ${this.serverIp}:${this.port}`);
+		svr.on('end', evt => L('srv end event:', evt));
+		svr.on('close', evt => L('srv close event:', evt));
+		svr.listen(z.port, () => L('server START port:', z.port));
+		z._server = svr;
+		z.isRunning = true;
+		L(`start server on ${z.serverIp}:${z.port}`);
 	}
 
 	stop() {
@@ -142,46 +138,46 @@ export class TMiniWebServerES {
 
 	getRouteHandler(urlPath, routeHeaders = [], method = EMPTY) {
 		D(`at getRouteHandler: search ${urlPath},${method}`);
-		const result = { routFunc: null, routeArgs: null };
+		const r = { routFunc: null, routeArgs: null };
 		try {
-			if (!routeHeaders) return result;
+			if (!routeHeaders) return r;
 			if (urlPath.endsWith('/')) urlPath = urlPath[-1];
-			const methodUpperCase = method.toUpperCase();
-			for (const handler of routeHeaders) {
-				if (handler.method !== methodUpperCase) continue;
-				const m = handler.routeRegex.exec(urlPath);
+			const mUC = method.toUpperCase();
+			for (const h of routeHeaders) {
+				if (h.method !== mUC) continue;
+				const m = h.routeRegex.exec(urlPath);
 				if (!m || m.length < 1) continue;
-				const routeArgNames = handler.routeArgNames;
-				result.routFunc = handler.routFunc;
-				if (routeArgNames && routeArgNames.length > 0) {
-					const routeArgs = {};
-					for (let i = 1, l = routeArgNames.length; i <= l; i++) {
-						const value = m[i];
-						routeArgs[routeArgNames[i - 1]] = isNaN(value) ? value : value * 1;
+				const rANs = h.routeArgNames;
+				r.routFunc = h.routFunc;
+				if (rANs && rANs.length > 0) {
+					const rAs = {};
+					for (let i = 1, l = rANs.length; i <= l; i++) {
+						const v = m[i];
+						rAs[rANs[i - 1]] = isNaN(v) ? v : v * 1;
 					}
-					result.routeArgs = routeArgs;
+					r.routeArgs = rAs;
 				}
-				return result;
+				return r;
 			}
 		} catch (ex) {
 			L(`[ERROR]at getRouteHandler:  ${urlPath}, ${method}`, ex);
 		}
-		return result;
+		return r;
 	}
 	async getPhysPathInWwwroot(requestPath) {
-		let filePath = EMPTY;
-		let isExistFile = false;
+		let fp = EMPTY,
+			isE = false;
 		if (requestPath !== '/') {
-			filePath = `${this._wwwroot}/${requestPath}`;
-			isExistFile = await U.isExistFile(filePath);
+			fp = `${this._wwwroot}/${requestPath}`;
+			isE = await U.isExistFile(fp);
 		} else
-			for (const fileName of INDEX_FILES) {
-				filePath = `${this._wwwroot}/${fileName}`;
-				isExistFile = await U.isExistFile(filePath);
-				if (isExistFile) break;
+			for (const fn of INDEX_FILES) {
+				fp = `${this._wwwroot}/${fn}`;
+				isE = await U.isExistFile(fp);
+				if (isE) break;
 			}
-		if (!isExistFile) return { filePath: null, mimeType: null };
-		return { filePath, mimeType: U.getMineTypeFromExt(filePath) };
+		if (!isE) return { filePath: null, mimeType: null };
+		return { filePath: fp, mimeType: U.getMineTypeFromExt(fp) };
 	}
 }
 
@@ -233,53 +229,53 @@ init();
 //TMiniWebLogic
 const TWL = {
 	parseFirstRow: async (line, u8a, lastCalledRouteFunc) => {
-		const parsed = {};
+		const p = {};
 		try {
 			L(`at parseFirstRow: line:${line}`, lastCalledRouteFunc);
-			const elements = line.split(' ');
-			L(`at parseFirstRow: A elements:${elements}`);
-			if (elements.length === 3) {
-				L(`at parseFirstRow: 3 elements:${elements}`);
-				parsed.method = elements[0].toUpperCase();
-				parsed.url = elements[1];
-				parsed._http_ver = elements[2].toUpperCase();
-				const urlParts = parsed.url.split('?');
-				parsed.reqPath = decodeURIComponent(urlParts.shift());
-				const querystring = urlParts.length > 0 ? urlParts.join('?') : EMPTY;
-				L(`at parseFirstRow: querystring:${querystring}`);
-				if (querystring) {
-					parsed.querystring = querystring;
-					const kvs = querystring.split('&');
+			const elms = line.split(' ');
+			L(`at parseFirstRow: A elements:${elms}`);
+			if (elms.length === 3) {
+				L(`at parseFirstRow: 3 elements:${elms}`);
+				p.method = elms[0].toUpperCase();
+				p.url = elms[1];
+				p._http_ver = elms[2].toUpperCase();
+				const up = p.url.split('?');
+				p.reqPath = decodeURIComponent(up.shift());
+				const qs = up.length > 0 ? up.join('?') : EMPTY;
+				L(`at parseFirstRow: querystring:${qs}`);
+				if (qs) {
+					p.querystring = qs;
+					const kvs = qs.split('&');
 					for (const kv of kvs) {
-						const pair = kv.split('=');
-						const value = pair.length > 1 ? decodeURIComponent(pair[1]) : EMPTY;
-						parsed.params[decodeURIComponent(pair[0])] = value;
+						const pair = kv.split('='),
+							v = pair.length > 1 ? decodeURIComponent(pair[1]) : EMPTY;
+						p.params[decodeURIComponent(pair[0])] = v;
 					}
-					D(`at parseFirstRow: querystring:${parsed.querystring} params:${parsed.params}`, parsed);
+					D(`at parseFirstRow: querystring:${p.querystring} params:${p.params}`, p);
 				}
-				return parsed;
-			} else if (elements.length <= 2 && lastCalledRouteFunc) {
+				return p;
+			} else if (elms.length <= 2 && lastCalledRouteFunc) {
 				await lastCalledRouteFunc(u8a);
-				parsed.url = WS;
-				return parsed;
-			} else return D('at parseFirstRow:failed read first line (http request)') || parsed;
+				p.url = WS;
+				return p;
+			} else return D('at parseFirstRow:failed read first line (http request)') || p;
 		} catch (ex) {
 			return L('[ERROR] at parseFirstRow:', ex) || false;
 		}
 	},
 	parseHeader: async lines => {
 		L(`at parseHeader: lines:${lines.length}`);
-		const headers = {};
-		for (const line of lines) {
-			const elements = line.trim().split(':');
-			const key = elements.shift().trim();
-			const value = elements.join(':').trim();
-			D(`at parseHeader: line:${line}  k/v ${key}/${value} elements:`, elements);
-			if (value) headers[key.toLowerCase()] = value;
-			else if (!value && !key) D(`at parseHeader: headers=${Object.keys(headers).length}`, headers);
-			else L(`at parseHeader:  warning: ${line}`);
+		const h = {};
+		for (const l of lines) {
+			const elms = l.trim().split(':'),
+				k = elms.shift().trim(),
+				v = elms.join(':').trim();
+			D(`at parseHeader: line:${l}  k/v ${k}/${v} elements:`, elms);
+			if (v) h[k.toLowerCase()] = v;
+			else if (!v && !k) D(`at parseHeader: headers=${Object.keys(h).length}`, h);
+			else L(`at parseHeader:  warning: ${l}`);
 		}
-		return headers;
+		return h;
 	},
 
 	writeResponseFromFile: async (
@@ -292,13 +288,14 @@ const TWL = {
 	) => {
 		D('[in] at writeResponseFromFile');
 		try {
+			L(`at writeResponseFromFile filePhysPath:${filePhysPath}`);
 			if (!(await U.isExistFile(filePhysPath))) return await TWL.writeErrorResponse(s, HttpStatusCode.NOT_FOUND);
 			if (contentType === null) contentType = U.getMineTypeFromExt(filePhysPath);
-			let length = U.getFileSize(filePhysPath);
-			const headers4Send = [];
-			await TWL.writeStatusCode(s, httpStatus, headers4Send);
-			await TWL.writeHeaders(s, headers, contentType, charset, length, headers4Send);
-			await U.readFile(filePhysPath, length, buffer => TWL.write(s, buffer));
+			let len = U.getFileSize(filePhysPath);
+			const h4s = [];
+			await TWL.writeStatusCode(s, httpStatus, h4s);
+			await TWL.writeHeaders(s, headers, contentType, charset, len, h4s);
+			await U.readFile(filePhysPath, len, buffer => TWL.write(s, buffer));
 		} catch (ex) {
 			L(`[ERROR]at writeResponseFromFile filePhysPath:${filePhysPath} httpStatus:${httpStatus}`, ex);
 		}
@@ -322,7 +319,7 @@ const TWL = {
 		const msg = httpStatusMessage[statusCode] || EMPTY;
 		return TWL.write(s, `HTTP/1.1 ${statusCode} ${msg}\r\n`);
 	},
-	writeHeader: (s, name, value) => TWL.write(s, `${name}: ${value}\r\n`),
+	writeHeader: (s, n, v) => TWL.write(s, `${n}: ${v}\r\n`),
 	writeContentTypeHeader: (s, contentType, charset = null, headers) => {
 		return TWL.writeHeader(
 			s,
@@ -333,7 +330,7 @@ const TWL = {
 	},
 	writeHeaders: async (s, headers, contentType, charset, length, headers4Send = []) => {
 		if (headers && typeof headers === 'object' && !Array.isArray(headers))
-			for (const header in headers) await TWL.writeHeader(s, header, headers[header], headers4Send);
+			for (const h in headers) await TWL.writeHeader(s, h, headers[h], headers4Send);
 		await TWL.writeHeader(s, 'server', 'TMiniWebServer', headers4Send);
 		await TWL.writeHeader(s, 'connection', 'close', headers4Send);
 		if (length > 0) {
@@ -352,15 +349,15 @@ const TWL = {
 	) => {
 		D('[in] writeResponse');
 		try {
-			let length = 0;
+			let len = 0;
 			if (content) {
-				const type = typeof content;
-				if (ACCEPTABLE_TYPE.includes(type)) content = Y.s2u(`${content}`, charset);
-				length = content.length;
+				const t = typeof content;
+				if (AT.includes(t)) content = Y.s2u(`${content}`, charset);
+				len = content.length;
 			}
-			const headers4Send = [];
-			await TWL.writeStatusCode(s, httpStatus, headers4Send);
-			await TWL.writeHeaders(s, headers, contentType, charset, length, headers4Send);
+			const h4s = [];
+			await TWL.writeStatusCode(s, httpStatus, h4s);
+			await TWL.writeHeaders(s, headers, contentType, charset, len, h4s);
 			await TWL.write(s, content);
 		} catch (ex) {
 			L('[ERROR] at writeResponse ', ex);
@@ -368,48 +365,50 @@ const TWL = {
 		D('[out] writeResponse');
 	},
 	checkUpgrade: headers => {
-		const connType = headers['connection'];
-		const upgrade = headers['upgrade'];
-		return connType && connType.toLowerCase().indexOf('upgrade') > -1 && upgrade ? upgrade.toLowerCase() : null;
+		const ct = headers['connection'],
+			ug = headers['upgrade'];
+		return ct && ct.toLowerCase().indexOf('upgrade') > -1 && ug ? ug.toLowerCase() : null;
 	},
 	writeBadRequest: async s => await TWL.writeErrorResponse(s, HttpStatusCode.BAD_REQUEST),
 	writeInternalServerError: async s => await TWL.writeErrorResponse(s, HttpStatusCode.INTERNAL_SERVER_ERROR),
 };
 class TMiniWebClient {
 	constructor(socket, server) {
-		this.spawnTime = Date.now();
-		this.socket = socket;
-		this.lastCalledRouteFunc = null;
-		this.tMWS = null;
-		this._server = server;
-		this.url = null;
+		const z = this;
+		z.spawnTime = Date.now();
+		z.socket = socket;
+		z.lastCalledRouteFunc = null;
+		z.tMWS = null;
+		z._server = server;
+		z.url = null;
 	}
 	destroy() {
-		const routeArgs = this.routeArgs;
-		for (const key in this.routeArgs) delete routeArgs[key];
-		delete this.routeArgs;
-		delete this.socket;
-		delete this.spawnTime;
-		if (this.tMWS) {
-			this.tMWS.destroy();
-			delete this.tMWS;
+		const z = this,
+			r = z.routeArgs;
+		for (const k in z.routeArgs) delete r[k];
+		delete z.routeArgs;
+		delete z.socket;
+		delete z.spawnTime;
+		if (z.tMWS) {
+			z.tMWS.destroy();
+			delete z.tMWS;
 		}
-		delete this.lastCalledRouteFunc;
+		delete z.lastCalledRouteFunc;
 	}
 	async close() {
-		const socket = this.socket;
-		const tMWS = this.tMWS;
-		const f = resolve => {
-			D('at close: TRY close!', [socket.destroyed, socket]);
-			tMWS && tMWS.setIsClosed();
-			if (socket.destroyed) return resolve();
-			try {
-				socket.end(EMPTY, () => D('close!') || resolve());
-			} catch (e) {
-				L('[WARN]at close: ', e) || resolve();
-			}
-		};
-		return new Promise(resolve => setTimeout(() => f(resolve), 100));
+		const s = this.socket,
+			tMWS = this.tMWS,
+			f = r => {
+				D('at close: TRY close!', [s.destroyed, s]);
+				tMWS && tMWS.setIsClosed();
+				if (s.destroyed) return r();
+				try {
+					s.end(EMPTY, () => D('close!') || r());
+				} catch (e) {
+					L('[WARN]at close: ', e) || r();
+				}
+			};
+		return new Promise(r => setTimeout(() => f(r), 100));
 	}
 	onClose(evt) {
 		if (this.tMWS && this.tMWS.onClose) this.tMWS.setIsClosed() || this.tMWS.onClose(this.tMWS, evt);
@@ -422,19 +421,19 @@ class TMiniWebClient {
 	}
 
 	async _processRequest(u8a) {
-		const str = Y.u2s(u8a);
-		const rows = str.split(/\r\n|\r|\n/g);
-		const s = this.socket;
-		const { method, url, reqPath } = await TWL.parseFirstRow(rows.shift(), u8a, this.lastCalledRouteFunc);
+		const str = Y.u2s(u8a),
+			rows = str.split(/\r\n|\r|\n/g),
+			s = this.socket,
+			{ method, url, reqPath } = await TWL.parseFirstRow(rows.shift(), u8a, this.lastCalledRouteFunc);
 		if (method) {
-			const headers = await TWL.parseHeader(rows);
-			const hl = Object.keys(headers).length;
+			const hs = await TWL.parseHeader(rows),
+				hl = Object.keys(hs).length;
 			if (hl > 0) {
-				const upgradeStr = TWL.checkUpgrade(headers);
-				return !upgradeStr
+				const ug = TWL.checkUpgrade(hs);
+				return !ug
 					? await this.routingHttp(method, url, reqPath, rows)
-					: upgradeStr === WS // WebSocket
-					? await this._routingWebsocket(reqPath, u8a, headers)
+					: ug === WS // WebSocket
+					? await this._routingWebsocket(reqPath, u8a, hs)
 					: await TWL.writeBadRequest(s);
 			} else await TWL.writeBadRequest(s);
 		} else if (url === WS) return true;
@@ -442,9 +441,9 @@ class TMiniWebClient {
 		return L('at _processRequest: false:' + false) || false;
 	}
 	async routingHttp(method, url, reqPath, rows) {
-		D('at routingHttp: START');
-		const s = this.socket;
-		const { routFunc, routeArgs } = this._server.getRouteHandler(reqPath, this._server.routeHeaders, method);
+		D(`at routingHttp: START reqPath:${reqPath} url:${url}`);
+		const s = this.socket,
+			{ routFunc, routeArgs } = this._server.getRouteHandler(reqPath, this._server.routeHeaders, method);
 		if (!method) D(`at routingHttp:method not found reqPath: ${reqPath}, url: ${url}`); // console.debug(this._headers);
 		if (routFunc) {
 			D(`at routingHttp:found reqPath: ${reqPath}, args: `, routeArgs);
@@ -482,21 +481,22 @@ class TMiniWebClient {
 	 */
 	async _routingWebsocket(reqPath, u8a, headers = {}) {
 		D('in _routing_websocket');
-		const { routFunc, routeArgs } = this._server.getRouteHandler(reqPath, this._server.routeHeaders, WS);
+		const z = this,
+			{ routFunc, routeArgs } = z._server.getRouteHandler(reqPath, z._server.routeHeaders, WS);
 		if (!routFunc) {
 			D(`not found websocket routFunc. [${reqPath}]`);
-			return (await TWL.writeBadRequest(this.socket)) || true;
+			return (await TWL.writeBadRequest(z.socket)) || true;
 		}
-		const tMWS = new TMiniWebSocket(this.socket);
+		const tMWS = new TMiniWebSocket(z.socket);
 		try {
 			if (!(await tMWS.handshake(headers))) return D('handshake failed.') || true;
 		} catch (e) {
 			return D('at _routingWebsocket handshake failed.', e) && false;
 		}
 		try {
-			this.routeArgs = routeArgs;
-			this.tMWS = tMWS;
-			this.lastCalledRouteFunc = async buff => await routFunc(tMWS, buff, routeArgs);
+			z.routeArgs = routeArgs;
+			z.tMWS = tMWS;
+			z.lastCalledRouteFunc = async buff => await routFunc(tMWS, buff, routeArgs);
 			D(`found routFunc: ${reqPath}, args: ${routeArgs}`);
 			await routFunc(tMWS, u8a, routeArgs);
 		} catch (ex) {
@@ -518,52 +518,52 @@ export const MessageType = {
 	BINARY: 2,
 };
 const BT = {
-	u126: new Uint8Array([126]),
-	u127: new Uint8Array([127]),
-	nullMask: new Uint8Array([0, 0, 0, 0]),
-};
-const NULL_NULL_ARRAY = [null, null];
-const TWS = {
-	_readFrame: (buff = new Uint8Array(1)) => {
-		if (buff.length < 2) {
-			L('at _readFrame:Invalid WebSocket frame header');
-			throw new Error(32, 'WebSocket connection closed');
-		}
-		const p = { fin: null, compressed: null, opcode: null, hasMask: null, payloadLength: null, length: null };
-		const u8a = new Uint8Array(buff);
-		const header0 = u8a[0];
-		const header1 = u8a[1];
-		// ヘッダのパース.
-		p.fin = (header0 & 0x80) === 0x80;
-		p.compressed = (header0 & 0x40) === 0x40;
-		p.opcode = header0 & 0x0f;
-		p.hasMask = (header1 & 0x80) === 0x80;
-		p.payloadLength = header1 & 0x7f; //0000.0111.1111.1111 payloadLength
-		const opcode = p.opcode;
-		const l1 = p.payloadLength;
-		const hasMask = p.hasMask;
-		const offset1 = (l1 < 0 ? -1 * l1 : 0) + 2;
-		p.length = l1 < 0 ? Y.u2i(u8a.subarray(2, offset1)) : l1;
-		const length = p.length;
-		D('at _readFrame:  compressed:', p);
-		const offset2 = hasMask ? offset1 + 4 : offset1;
-		const offset3 = offset2 + length;
-		const payload = u8a.subarray(offset2, offset3);
-		const l = payload.length;
-		const o = new Uint8Array(l);
-		const mask = hasMask ? u8a.subarray(offset1, offset2) : BT.nullMask;
-		if (hasMask && (mask[0] | mask[1] | mask[2] | mask[3]) !== 0)
-			for (let i = 0; i < l; i++) o[i] = payload[i] ^ mask[i % 4];
-		else for (let i = 0; i < l; i++) o[i] = payload[i];
-		return { opcode, payload: o };
+		u126: new Uint8Array([126]),
+		u127: new Uint8Array([127]),
+		nullMask: new Uint8Array([0, 0, 0, 0]),
 	},
-	_processFrame: (opcode, payload) => {
-		const data = opcode === Opcode.TEXT ? Y.u2s(payload) : opcode === Opcode.PONG ? null : payload;
-		const isSendRes = opcode === Opcode.PING ? Opcode.PONG : null;
-		const isClosed = opcode === Opcode.CLOSE;
-		return { isSendRes, data, isClosed };
-	},
-};
+	NULL_NULL_ARRAY = [null, null],
+	TWS = {
+		_readFrame: (buff = new Uint8Array(1)) => {
+			if (buff.length < 2) {
+				L('at _readFrame:Invalid WebSocket frame header');
+				throw new Error(32, 'WebSocket connection closed');
+			}
+			const p = { fin: null, compressed: null, opcode: null, hasMask: null, payloadLength: null, length: null },
+				u8a = new Uint8Array(buff),
+				h0 = u8a[0],
+				h1 = u8a[1];
+			// ヘッダのパース.
+			p.fin = (h0 & 0x80) === 0x80;
+			p.compressed = (h0 & 0x40) === 0x40;
+			p.opcode = h0 & 0x0f;
+			p.hasMask = (h1 & 0x80) === 0x80;
+			p.payloadLength = h1 & 0x7f; //0000.0111.1111.1111 payloadLength
+			const opcode = p.opcode,
+				l1 = p.payloadLength,
+				hasMask = p.hasMask,
+				o1 = (l1 < 0 ? -1 * l1 : 0) + 2;
+			p.length = l1 < 0 ? Y.u2i(u8a.subarray(2, o1)) : l1;
+			const len = p.length;
+			D('at _readFrame:  compressed:', p);
+			const o2 = hasMask ? o1 + 4 : o1,
+				o3 = o2 + len,
+				pl = u8a.subarray(o2, o3),
+				l = pl.length,
+				o = new Uint8Array(l),
+				mask = hasMask ? u8a.subarray(o1, o2) : BT.nullMask;
+			if (hasMask && (mask[0] | mask[1] | mask[2] | mask[3]) !== 0)
+				for (let i = 0; i < l; i++) o[i] = pl[i] ^ mask[i % 4];
+			else for (let i = 0; i < l; i++) o[i] = pl[i];
+			return { opcode, payload: o };
+		},
+		_processFrame: (opcode, payload) => {
+			const data = opcode === Opcode.TEXT ? Y.u2s(payload) : opcode === Opcode.PONG ? null : payload,
+				isSendRes = opcode === Opcode.PING ? Opcode.PONG : null,
+				isClosed = opcode === Opcode.CLOSE;
+			return { isSendRes, data, isClosed };
+		},
+	};
 export class TMiniWebSocket {
 	constructor(socket) {
 		this.socket = socket;
@@ -590,11 +590,11 @@ export class TMiniWebSocket {
 		this._closed = true;
 	}
 	async handshake(headers) {
-		const websocketKey = headers['sec-websocket-key'];
-		if (!websocketKey) return (await TWL.writeBadRequest(this.socket)) || false;
+		const wk = headers['sec-websocket-key'];
+		if (!wk) return (await TWL.writeBadRequest(this.socket)) || false;
 		else {
 			const sha1 = new SHA1();
-			sha1.update(websocketKey);
+			sha1.update(wk);
 			sha1.update('258EAFA5-E914-47DA-95CA-C5AB0DC85B11');
 			const resKey = Y.h2B(sha1.finalize().toString());
 			return (await this.sendUpgradeResponse(resKey)) || true;
@@ -602,8 +602,8 @@ export class TMiniWebSocket {
 	}
 	async receive(u8a) {
 		try {
-			const { opcode, payload } = TWS._readFrame(u8a);
-			const { isSendRes, data, isClosed } = TWS._processFrame(opcode, payload);
+			const { opcode, payload } = TWS._readFrame(u8a),
+				{ isSendRes, data, isClosed } = TWS._processFrame(opcode, payload);
 			this._closed = isClosed;
 			if (isClosed) return NULL_NULL_ARRAY;
 			if (isSendRes) await this.sendCore(isSendRes, data);
@@ -635,22 +635,21 @@ export class TMiniWebSocket {
 	async sendCore(opcode, payload) {
 		if (this.isClosed()) return;
 		try {
-			const frame = [];
-			const u = new Uint8Array([0x80 | parseInt(opcode)]);
-			frame.push(u);
-			const p2 = payload && opcode === Opcode.TEXT ? Y.s2u(payload) : payload;
-			const pl = p2 ? p2.length : 0;
-			if (pl < 126) frame.push(Y.i2u(pl, 1));
+			const fm = [],
+				u = new Uint8Array([0x80 | parseInt(opcode)]),
+				p2 = payload && opcode === Opcode.TEXT ? Y.s2u(payload) : payload,
+				pl = p2 ? p2.length : 0;
+			fm.push(u);
+			if (pl < 126) fm.push(Y.i2u(pl, 1));
 			else if (pl < 1 << 16) {
-				frame.push(BT.u126);
-				frame.push(Y.i2u(pl, 2));
+				fm.push(BT.u126);
+				fm.push(Y.i2u(pl, 2));
 			} else {
-				frame.push(BT.u127);
-				frame.push(Y.i2u(pl, 8));
+				fm.push(BT.u127);
+				fm.push(Y.i2u(pl, 8));
 			}
-			if (p2) frame.push(p2);
-			const n = Y.jus(frame);
-			await TWL.write(this.socket, n);
+			if (p2) fm.push(p2);
+			await TWL.write(this.socket, Y.jus(fm));
 		} catch (ex) {
 			if (ex && ex.errno === 104) this._closed = true; // ECONNRESET
 			else L(`[ERROR] at sendCore: opcode:${opcode}`, ex);
