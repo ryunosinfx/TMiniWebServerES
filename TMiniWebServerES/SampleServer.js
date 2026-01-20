@@ -71,13 +71,13 @@ const Chat = {
 	isSame: (a, b) => a === b,
 	isNotSame: (a, b) => a !== b,
 	filterUserList: async (userList, param, cb = Chat.cb) => {
-		const bl = Chat.bl1;
+		const bl = Chat.bl1,
+			bl2 = Chat.bl2,
+			bl3 = Chat.bl3,
+			now = Date.now();
 		bl.splice(0, bl.length);
-		const bl2 = Chat.bl2;
 		bl2.splice(0, bl2.length);
-		const bl3 = Chat.bl3;
 		bl3.splice(0, bl3.length);
-		const now = Date.now();
 		for (const u of userList)
 			if (u.expire > now && (cb === Chat.cb || cb(u.userId, param))) bl.push(u);
 			else bl2.push(u) && bl3.push(u);

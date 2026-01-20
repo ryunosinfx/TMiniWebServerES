@@ -91,25 +91,30 @@ export class TMiniWebServerES {
 		TMWS.addRouteItem(ROUT_HEADERS, z.routeHeaders);
 	}
 	async start() {
+		L('start 1');
 		if (this.isStarted()) return;
+		L('start 2');
 		const z = this,
 			a = {},
 			svr = net.createServer(s => {
-				D(`client connected at ${s.localAddress}`); // 'connection' listener.
-				const c = new TMiniWebClient(s, z),
-					k = `${Date.now()}/${Math.random()}`;
-				a[k] = c;
-				s.on('data', u8a => c._processRequest(u8a));
-				s.on('end', evt => L('end event:', evt) && c.onEnd());
-				s.on('close', evt => L('close event:', evt) && TMWS.deleteExpireConns(a) && c.onClose(evt));
-				s.on('drain', evt => L('drain event:', evt) && c.onDrain());
-				L(`writableLength:${s.writableLength} writableNeedDrain:${s.writableNeedDrain}`);
 				try {
+					console.log(s);
+					D(`client connected at ${s.localAddress}`); // 'connection' listener.
+					const c = new TMiniWebClient(s, z),
+						k = `${Date.now()}/${Math.random()}`;
+					a[k] = c;
+					s.on('data', u8a => c._processRequest(u8a));
+					s.on('end', evt => L('end event:', evt) && c.onEnd());
+					s.on('close', evt => L('close event:', evt) && TMWS.deleteExpireConns(a) && c.onClose(evt));
+					s.on('drain', evt => L('drain event:', evt) && c.onDrain());
+					L(`writableLength:${s.writableLength} writableNeedDrain:${s.writableNeedDrain}`);
+
 					L(`at serverProc:connected by ${s.remoteAddress ? s.remoteAddress : EMPTY}`);
 				} catch (ex) {
 					L(`[ERROR]at serverProc:process request failed.`, ex);
 				}
 			});
+		L('start 3');
 		svr.on('error', err => {
 			L('[ERROR] at server:', err);
 			throw err;
@@ -167,15 +172,21 @@ export class TMiniWebServerES {
 	async getPhysPathInWwwroot(requestPath) {
 		let fp = EMPTY,
 			isE = false;
+		L('getPhysPathInWwwroot 1 requestPath:' + requestPath);
 		if (requestPath !== '/') {
+			L('getPhysPathInWwwroot 2 requestPath:' + requestPath);
 			fp = `${this._wwwroot}/${requestPath}`;
 			isE = await U.isExistFile(fp);
-		} else
+		} else {
+			L('getPhysPathInWwwroot 3 requestPath===/:' + INDEX_FILES);
 			for (const fn of INDEX_FILES) {
 				fp = `${this._wwwroot}/${fn}`;
+				L('getPhysPathInWwwroot 4 fp:' + fp);
 				isE = await U.isExistFile(fp);
+				L('getPhysPathInWwwroot 5 isE:' + isE);
 				if (isE) break;
 			}
+		}
 		if (!isE) return { filePath: null, mimeType: null };
 		return { filePath: fp, mimeType: U.getMineTypeFromExt(fp) };
 	}
@@ -312,7 +323,7 @@ const TWL = {
 				? s.write(
 						data,
 						evt => (evt ? reject(evt) : resolve()) || D(`send!${typeof evt}/${s.bytesWritten}`, evt)
-				  )
+					)
 				: resolve(s.destroyed)
 		),
 	writeStatusCode: (s, statusCode) => {
@@ -433,8 +444,8 @@ class TMiniWebClient {
 				return !ug
 					? await this.routingHttp(method, url, reqPath, rows)
 					: ug === WS // WebSocket
-					? await this._routingWebsocket(reqPath, u8a, hs)
-					: await TWL.writeBadRequest(s);
+						? await this._routingWebsocket(reqPath, u8a, hs)
+						: await TWL.writeBadRequest(s);
 			} else await TWL.writeBadRequest(s);
 		} else if (url === WS) return true;
 		else await TWL.writeInternalServerError(s);
@@ -453,8 +464,9 @@ class TMiniWebClient {
 				D(`at routingHttp:Throw Exception in exec routeFunc: ${ex}`);
 			}
 		} else {
-			D('at routingHttp:routing !== found.');
+			D('at routingHttp:routing !== found. METHOD:' + method);
 			if (method === 'GET') {
+				D('at routingHttp:routing !== found. reqPath:' + reqPath);
 				const { filePath, mimeType } = await this._server.getPhysPathInWwwroot(reqPath);
 				D(`at routingHttp:search static files [${this._server._wwwroot}] filePath:${filePath}`);
 				if (!filePath) {
@@ -651,7 +663,8 @@ export class TMiniWebSocket {
 			if (p2) fm.push(p2);
 			await TWL.write(this.socket, Y.jus(fm));
 		} catch (ex) {
-			if (ex && ex.errno === 104) this._closed = true; // ECONNRESET
+			if (ex && ex.errno === 104)
+				this._closed = true; // ECONNRESET
 			else L(`[ERROR] at sendCore: opcode:${opcode}`, ex);
 		}
 	}

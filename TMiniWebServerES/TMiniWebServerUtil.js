@@ -1,8 +1,10 @@
 import fs from 'fs';
+import path from 'path';
 import { L } from './Utils.js';
 
 const te = new TextEncoder(),
 	td = new TextDecoder(),
+	tda = new TextDecoder('ascii'),
 	E = '',
 	P = '/',
 	gBl = b => b.byteLength;
@@ -14,6 +16,7 @@ export const B = {
 		isB64: (s = E) => s % 4 === 0 && /[+/=0-9a-zA-Z]+/.test(s),
 		s2u: s => te.encode(s),
 		u2s: u => td.decode(u),
+		u2sa: u => tda.decode(u),
 		a2B: i => btoa(Y.u2b(B.u8(i.buffer ? i.buffer : i))),
 		u2B: u => btoa(Y.u2b(u)),
 		a2U: a => Y.B2U(Y.a2B(a)),
@@ -150,6 +153,7 @@ const htmlEscapeChars = {
 	};
 
 export const TMiniWebServerUtil = {
+		isKaluma: false,
 		escapeHtml: s => {
 			const p = s.split('');
 			for (let i = 0; i < p.length; i++) {
@@ -159,18 +163,110 @@ export const TMiniWebServerUtil = {
 			}
 			return p.join('');
 		},
-		isExistFile: p => {
+		isExistFile: async (p, timeout = 3000) => {
+			L('isExistFile 1 p:' + p);
 			const fp = p.split('//').join('/');
-			return new Promise(r =>
-				fs.stat(fp, (er, stat) => {
-					L(`p:${fp}`);
-					r(!er);
-					if (er) L(er.code === 'ENOENT' ? 'ファイル・ディレクトリは存在しません。' : er.message);
-					else L((stat.isFile() ? 'ファイル' : stat.isDirectory() ? 'ディレクトリ' : '不明') + 'です', stat);
-				})
-			);
+			const f = TMiniWebServerUtil.isKaluma
+				? TMiniWebServerUtil.isExistFileKaluma
+				: TMiniWebServerUtil.isExistFileNode;
+			L('isExistFile 2 fp:' + fp);
+			return await f(fp, timeout);
 		},
-		readFile: (path, length, writeCallBack) => {
+		isExistFileKaluma: fp => {
+			try {
+				const stat = fs.stat(fp);
+				L((stat.isFile() ? 'ファイル' : stat.isDirectory() ? 'ディレクトリ' : '不明') + 'です', stat);
+				return true;
+			} catch (e) {
+				L('error at fs.stat fp:' + fp + '/e:', e);
+			}
+			return false;
+		},
+		isExistFileNode: (fp, timeout = 3000) => {
+			return new Promise(r => {
+				let completed = false;
+
+				// タイムアウト処理：指定時間内にコールバックが呼ばれなければ false を返す
+				const timeoutId = setTimeout(() => {
+					if (!completed) {
+						L(`fs.stat timeout for: ${fp}`);
+						completed = true;
+						r(false);
+					}
+				}, timeout);
+				try {
+					fs.stat(fp, (er, stat) => {
+						// 既にタイムアウトで完了している場合はスキップ
+						if (completed) return;
+
+						completed = true;
+						clearTimeout(timeoutId);
+
+						L(`p:${fp}`);
+						if (er) {
+							L(er.code === 'ENOENT' ? 'ファイル・ディレクトリは存在しません。' : er.message);
+							r(false);
+						} else {
+							L(
+								(stat.isFile() ? 'ファイル' : stat.isDirectory() ? 'ディレクトリ' : '不明') + 'です',
+								stat
+							);
+							r(true);
+						}
+					});
+				} catch (e) {
+					L('error at fs.stat fp:' + fp + '/e:', e);
+					r(false);
+				}
+			});
+		},
+		listFiles: async p => {
+			const fp = p.split('//').join('/');
+			const f = TMiniWebServerUtil.isKaluma
+				? TMiniWebServerUtil.listFilesKaluma
+				: TMiniWebServerUtil.listFilesNode;
+			L('listFiles 2 fp:' + fp);
+			return await f(fp);
+		},
+		listFilesKaluma: fp => {
+			L('listFilesKaluma 1 fp:' + fp);
+			const items = fs.readdir(fp);
+			L('listFilesKaluma 2 items:', items);
+			return items.map(name => path.join(fp, name));
+		},
+		listFilesNode: fp => {
+			return new Promise(r => {
+				L('listFilesNode 1 fp:' + fp);
+				fs.readdir(fp, (err, items) => {
+					L('listFilesNode 2 items:', items);
+					if (err) return r(err);
+					r(items.map(name => path.join(fp, name)));
+				});
+			});
+		},
+		readFile: async (p, len, writeCB) => {
+			if (len <= 0) return null;
+			const fp = p.split('//').join('/');
+			const f = TMiniWebServerUtil.isKaluma ? TMiniWebServerUtil.readFileKaluma : TMiniWebServerUtil.readFileNode;
+			L('readFile 2 fp:' + fp);
+			return await f(fp, len, writeCB);
+		},
+		readFileKaluma: async (fp, len, writeCallBack) => {
+			if (len <= 0) return null;
+			const fd = fs.open(fp);
+			const c = Math.ceil(len / READ_UNIT);
+			for (let i = 0; i < c; i++) {
+				const s = READ_UNIT * i;
+				const t = s + READ_UNIT;
+				const e = t > len ? len : t;
+				const d = e - s;
+				const buf = new Uint8Array(d);
+				fs.read(fd, buf, s, d, 0);
+				await writeCallBack(buf);
+			}
+			fs.close(fd);
+		},
+		readFileNode: (path, length, writeCallBack) => {
 			if (length <= 0) return null;
 			return new Promise(r => {
 				fs.open(path, 'r', async (err, fd) => {

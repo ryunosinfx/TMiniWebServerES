@@ -1,9 +1,34 @@
 ///これはバンドル用でnodejsでは使用しません。
 import { WiFi } from 'wifi';
+// import fs from 'fs';
 import net from 'net';
+// import { Flash } from 'flash';
 import { PicoCYW43 } from 'pico_cyw43';
 import { startSampleServer } from './SampleServer';
+import { TMiniWebServerUtil } from './TMiniWebServerUtil.js';
 import { awaitF, L } from './Utils.js';
+TMiniWebServerUtil.isKaluma = true;
+// const rangeOfFlash = { start: 384, end: 767 };
+// async function mountFs(range) {
+// 	const { VFSLittleFS } = require('vfs_lfs');
+
+// 	// register lfs filesystem type
+// 	fs.register('lfs', VFSLittleFS);
+
+// 	try {
+// 		console.log('Flash', Flash);
+// 		const blockDevice = new Flash(range.start, range.end - range.start + 1);
+// 		console.log('blockDevice', blockDevice);
+// 		fs.mount('/', blockDevice, 'lfs');
+// 		console.log('fs', fs);
+// 		console.log('fs.cwd()', fs.cwd());
+// 		console.log('fs.readdir("/")', fs.readdir('/'));
+// 		console.log('fs.readdir("/")', await TMiniWebServerUtil.listFiles('/'));
+// 	} catch (e) {
+// 		console.error('err mount littleFS', e);
+// 	}
+// }
+// mountFs(rangeOfFlash);
 
 const N = null,
 	state = { s: N, c: 0 },
@@ -131,23 +156,37 @@ const HttpPinger = {
 	},
 };
 const wifi = new WiFi();
+
 wifi.connect(err => {
 	L('wifi.connect!!');
-	err ? console.error(err) : N;
-	wifi.getConnection(async (err, info) => {
+	if (err) {
+		console.error('WiFi connect error:', err);
+		wifi.close(); // ← エラー時も必ず close()
+		return;
+	}
+
+	wifi.getConnection((err, info) => {
 		L(`getConnection 01 err:${err} / info:${info}`);
-		try {
-			// await HttpPinger.ping();
-		} catch (e) {
-			L('e', e);
+
+		if (err) {
+			console.error('Failed to get connection info:', err);
+			wifi.close(); // ← エラー時に close()
+			return;
 		}
-		L(`getConnection 02`);
-		// eslint-disable-next-line no-undef
-		L(`#####getConnection ip:${storage.getItem('ip')}######`);
-		startSampleServer('/wwwroot');
-		return err // eslint-disable-next-line no-undef
-			? console.error('Failed to get connection info:', err) || storage.seItem('ip', err)
-			: // eslint-disable-next-line no-undef
-			  storage.seItem('ip', info.ip); // The IP address is in the 'ip' property
+
+		try {
+			(async () => {
+				//await HttpPinger.ping();
+				// eslint-disable-next-line no-undef
+				L(`####1#getConnection ip:${storage.getItem('ip')}######`);
+				await awaitF(1000);
+				startSampleServer('/wwwroot');
+				L('END INIT AFTER CONNECT!');
+			})();
+		} catch (e) {
+			L('ping error:', e);
+		} finally {
+			// wifi.close(); // ← 最終的に必ず close() して unlock
+		}
 	});
 });
