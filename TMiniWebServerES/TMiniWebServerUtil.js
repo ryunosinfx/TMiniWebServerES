@@ -1,10 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { L } from './Utils.js';
+import { L, D } from './Utils.js';
 
 const te = new TextEncoder(),
 	td = new TextDecoder(),
-	tda = new TextDecoder('ascii'),
 	E = '',
 	P = '/',
 	gBl = b => b.byteLength;
@@ -16,7 +15,6 @@ export const B = {
 		isB64: (s = E) => s % 4 === 0 && /[+/=0-9a-zA-Z]+/.test(s),
 		s2u: s => te.encode(s),
 		u2s: u => td.decode(u),
-		u2sa: u => tda.decode(u),
 		a2B: i => btoa(Y.u2b(B.u8(i.buffer ? i.buffer : i))),
 		u2B: u => btoa(Y.u2b(u)),
 		a2U: a => Y.B2U(Y.a2B(a)),
@@ -96,8 +94,7 @@ export const B = {
 		c: ab => Y.a(new Response(ab).body.pipeThrough(new CompressionStream('gzip'))),
 		d: ab => Y.a(new Blob([ab]).stream().pipeThrough(new DecompressionStream('gzip'))),
 		u: async () => {
-			const json = { a: 1 },
-				str = JSON.stringify(json),
+			const str = JSON.stringify({ a: 1 }),
 				compressed = await Y.d(str),
 				restored = await Y.c(compressed);
 			console.assert(str === restored);
@@ -126,180 +123,170 @@ const htmlEscapeChars = {
 	},
 	READ_UNIT = 4 * 1024,
 	MIME_TYPES = {
-		'.txt': 'text/plain',
-		'.htm': 'text/html',
-		'.html': 'text/html',
-		'.css': 'text/css',
-		'.csv': 'text/csv',
-		'.js': 'application/javascript',
-		'.xml': 'application/xml',
-		'.xhtml': 'application/xhtml+xml',
-		'.json': 'application/json',
-		'.zip': 'application/zip',
-		'.gz': 'application/gzip',
-		'.pdf': 'application/pdf',
-		'.tar': 'application/x-tar',
-		'.7z': 'application/x-7z-compressed',
-		'.ts': 'application/typescript',
-		'.woff': 'font/woff',
-		'.woff2': 'font/woff2',
-		'.jpg': 'image/jpeg',
-		'.jpeg': 'image/jpeg',
-		'.png': 'image/png',
-		'.gif': 'image/gif',
-		'.svg': 'image/svg+xml',
-		'.ico': 'image/x-icon',
-		'.bin': 'application/octet-stream',
+		txt: 'text/plain',
+		htm: 'text/html',
+		html: 'text/html',
+		css: 'text/css',
+		csv: 'text/csv',
+		js: 'application/javascript',
+		xml: 'application/xml',
+		xhtml: 'application/xhtml+xml',
+		json: 'application/json',
+		zip: 'application/zip',
+		gz: 'application/gzip',
+		pdf: 'application/pdf',
+		tar: 'application/x-tar',
+		'7z': 'application/x-7z-compressed',
+		ts: 'application/typescript',
+		woff: 'font/woff',
+		woff2: 'font/woff2',
+		jpg: 'image/jpeg',
+		jpeg: 'image/jpeg',
+		png: 'image/png',
+		gif: 'image/gif',
+		svg: 'image/svg+xml',
+		ico: 'image/x-icon',
+		bin: 'application/octet-stream',
 	};
 
-export const TMiniWebServerUtil = {
-		isKaluma: false,
-		escapeHtml: s => {
-			const p = s.split('');
-			for (let i = 0; i < p.length; i++) {
-				const v = p[i],
-					n = htmlEscapeChars[v];
-				if (n) p[i] = n;
-			}
-			return p.join('');
-		},
-		isExistFile: async (p, timeout = 3000) => {
-			L('isExistFile 1 p:' + p);
-			const fp = p.split('//').join('/');
-			const f = TMiniWebServerUtil.isKaluma
-				? TMiniWebServerUtil.isExistFileKaluma
-				: TMiniWebServerUtil.isExistFileNode;
-			L('isExistFile 2 fp:' + fp);
-			return await f(fp, timeout);
-		},
-		isExistFileKaluma: fp => {
-			try {
-				const stat = fs.stat(fp);
-				L((stat.isFile() ? 'ファイル' : stat.isDirectory() ? 'ディレクトリ' : '不明') + 'です', stat);
-				return true;
-			} catch (e) {
-				L('error at fs.stat fp:' + fp + '/e:', e);
-			}
-			return false;
-		},
-		isExistFileNode: (fp, timeout = 3000) => {
-			return new Promise(r => {
-				let completed = false;
+const U = {
+	isKaluma: false,
+	escapeHtml: s => {
+		const p = s.split('');
+		for (let i = 0, l = P.length; i < l; i++) {
+			const n = htmlEscapeChars[p[i]];
+			if (n) p[i] = n;
+		}
+		return p.join('');
+	},
+	isExistFile: async (p, timeout = 3000) => {
+		D('isExistFile 1 p:' + p);
+		const fp = p.split('//').join('/'),
+			f = U.isKaluma ? U.iefKaluma : U.iefNode;
+		D('isExistFile 2 fp:' + fp);
+		return await f(fp, timeout);
+	},
+	iefKaluma: fp => {
+		try {
+			const stat = fs.stat(fp);
+			L((stat.isFile() ? 'ファイル' : stat.isDirectory() ? 'ディレクトリ' : '不明') + 'です', stat);
+			return true;
+		} catch (e) {
+			L(`error at fs.stat fp:${fp}/e:`, e);
+		}
+		return false;
+	},
+	iefNode: (fp, timeout = 3000) => {
+		return new Promise(r => {
+			let compl = false;
 
-				// タイムアウト処理：指定時間内にコールバックが呼ばれなければ false を返す
-				const timeoutId = setTimeout(() => {
-					if (!completed) {
-						L(`fs.stat timeout for: ${fp}`);
-						completed = true;
-						r(false);
-					}
-				}, timeout);
-				try {
-					fs.stat(fp, (er, stat) => {
-						// 既にタイムアウトで完了している場合はスキップ
-						if (completed) return;
-
-						completed = true;
-						clearTimeout(timeoutId);
-
-						L(`p:${fp}`);
-						if (er) {
-							L(er.code === 'ENOENT' ? 'ファイル・ディレクトリは存在しません。' : er.message);
-							r(false);
-						} else {
-							L(
-								(stat.isFile() ? 'ファイル' : stat.isDirectory() ? 'ディレクトリ' : '不明') + 'です',
-								stat
-							);
-							r(true);
-						}
-					});
-				} catch (e) {
-					L('error at fs.stat fp:' + fp + '/e:', e);
+			// タイムアウト処理：指定時間内にコールバックが呼ばれなければ false を返す
+			const tid = setTimeout(() => {
+				if (!compl) {
+					L(`fs.stat timeout for: ${fp}`);
+					compl = true;
 					r(false);
 				}
-			});
-		},
-		listFiles: async p => {
-			const fp = p.split('//').join('/');
-			const f = TMiniWebServerUtil.isKaluma
-				? TMiniWebServerUtil.listFilesKaluma
-				: TMiniWebServerUtil.listFilesNode;
-			L('listFiles 2 fp:' + fp);
-			return await f(fp);
-		},
-		listFilesKaluma: fp => {
-			L('listFilesKaluma 1 fp:' + fp);
-			const items = fs.readdir(fp);
-			L('listFilesKaluma 2 items:', items);
-			return items.map(name => path.join(fp, name));
-		},
-		listFilesNode: fp => {
-			return new Promise(r => {
-				L('listFilesNode 1 fp:' + fp);
-				fs.readdir(fp, (err, items) => {
-					L('listFilesNode 2 items:', items);
-					if (err) return r(err);
-					r(items.map(name => path.join(fp, name)));
-				});
-			});
-		},
-		readFile: async (p, len, writeCB) => {
-			if (len <= 0) return null;
-			const fp = p.split('//').join('/');
-			const f = TMiniWebServerUtil.isKaluma ? TMiniWebServerUtil.readFileKaluma : TMiniWebServerUtil.readFileNode;
-			L('readFile 2 fp:' + fp);
-			return await f(fp, len, writeCB);
-		},
-		readFileKaluma: async (fp, len, writeCallBack) => {
-			if (len <= 0) return null;
-			const fd = fs.open(fp);
-			const c = Math.ceil(len / READ_UNIT);
-			for (let i = 0; i < c; i++) {
-				const s = READ_UNIT * i;
-				const t = s + READ_UNIT;
-				const e = t > len ? len : t;
-				const d = e - s;
-				const buf = new Uint8Array(d);
-				fs.read(fd, buf, s, d, 0);
-				await writeCallBack(buf);
-			}
-			fs.close(fd);
-		},
-		readFileNode: (path, length, writeCallBack) => {
-			if (length <= 0) return null;
-			return new Promise(r => {
-				fs.open(path, 'r', async (err, fd) => {
-					if (err) return L('ファイルが開けない');
-					// with open(file_phys_path, 'rb') as f:
-					fs.read(fd, async (err, br, buf) => {
-						L(`read ${err},${br}, ${buf}`);
-						const ro = 0;
-						if (err) console.error(err);
-						if (br >= ro + READ_UNIT) await writeCallBack(buf);
-						else if (br > ro) await writeCallBack(buf.subarray(0, br - ro));
-						fs.close(fd);
-						r();
-					});
-				});
-			});
-		},
-
-		getMineTypeFromExt: fp => {
-			const p = fp.toLowerCase();
-			for (const ext in MIME_TYPES) if (p.endsWith(ext)) return MIME_TYPES[ext];
-			return 'application/octet-stream';
-		},
-		getFileSize: p => {
+			}, timeout);
 			try {
-				const stats = fs.statSync ? fs.statSync(p) : fs.stat(p);
-				return stats.size;
+				fs.stat(fp, (er, stat) => {
+					// 既にタイムアウトで完了している場合はスキップ
+					if (compl) return;
+
+					compl = true;
+					clearTimeout(tid);
+
+					L(`p:${fp}`);
+					if (er) {
+						L(er.code === 'ENOENT' ? 'ファイル・ディレクトリは存在しません。' : er.message);
+						r(false);
+					} else {
+						L((stat.isFile() ? 'ファイル' : stat.isDirectory() ? 'ディレクトリ' : '不明') + 'です', stat);
+						r(true);
+					}
+				});
 			} catch (e) {
-				L(e);
+				L(`error at fs.stat fp:${fp}/e:`, e);
+				r(false);
 			}
-			return 0;
-		},
+		});
 	},
+	listFiles: async p => {
+		const fp = p.split('//').join('/'),
+			f = U.isKaluma ? U.lfKaluma : U.lfNode;
+		D('listFiles 2 fp:' + fp);
+		return await f(fp);
+	},
+	lfKaluma: fp => {
+		D('listFilesKaluma 1 fp:' + fp);
+		const items = fs.readdir(fp);
+		D('listFilesKaluma 2 items:', items);
+		return items.map(name => path.join(fp, name));
+	},
+	lfNode: fp =>
+		new Promise(r => {
+			D('listFilesNode 1 fp:' + fp);
+			fs.readdir(fp, (err, items) => {
+				D('listFilesNode 2 items:', items);
+				if (err) return r(err);
+				r(items.map(name => path.join(fp, name)));
+			});
+		}),
+	readFile: async (p, len, writeCB) => {
+		if (len <= 0) return null;
+		const fp = p.split('//').join('/'),
+			f = U.isKaluma ? U.rfKaluma : U.rfNode;
+		D('readFile 2 fp:' + fp);
+		return await f(fp, len, writeCB);
+	},
+	rfKaluma: async (fp, len, writeCallBack) => {
+		const fd = fs.open(fp),
+			c = Math.ceil(len / READ_UNIT);
+		for (let i = 0; i < c; i++) {
+			const s = READ_UNIT * i,
+				t = s + READ_UNIT,
+				e = t > len ? len : t,
+				d = e - s,
+				buf = new Uint8Array(d);
+			fs.read(fd, buf, 0, d, s);
+			await writeCallBack(buf);
+		}
+		fs.close(fd);
+	},
+	rfNode: (path, length, writeCallBack) =>
+		length <= 0
+			? null
+			: new Promise(r => {
+					fs.open(path, 'r', async (err, fd) => {
+						if (err) return L('ファイルが開けない');
+						// with open(file_phys_path, 'rb') as f:
+						fs.read(fd, async (err, br, buf) => {
+							L(`read ${err},${br}, ${buf}`);
+							const ro = 0;
+							if (err) console.error(err);
+							if (br >= ro + READ_UNIT) await writeCallBack(buf);
+							else if (br > ro) await writeCallBack(buf.subarray(0, br - ro));
+							fs.close(fd);
+							r();
+						});
+					});
+				}),
+	getMineTypeFromExt: fp => {
+		const mt = MIME_TYPES[fp.toLowerCase().split('.').pop()];
+		return mt ? mt : 'application/octet-stream';
+	},
+	getFileSize: p => {
+		try {
+			const s = fs.statSync ? fs.statSync(p) : fs.stat(p);
+			return s.size;
+		} catch (e) {
+			L(e);
+		}
+		return 0;
+	},
+};
+
+export const TMiniWebServerUtil = U,
 	HttpStatusCode = {
 		SWITCH_PROTOCOLS: 101,
 		OK: 200,

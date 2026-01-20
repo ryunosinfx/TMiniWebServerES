@@ -172,13 +172,13 @@ export class TMiniWebServerES {
 	async getPhysPathInWwwroot(requestPath) {
 		let fp = EMPTY,
 			isE = false;
-		L('getPhysPathInWwwroot 1 requestPath:' + requestPath);
+		D(`getPhysPathInWwwroot 1 requestPath:${requestPath}`);
 		if (requestPath !== '/') {
-			L('getPhysPathInWwwroot 2 requestPath:' + requestPath);
+			D(`getPhysPathInWwwroot 2 requestPath:${requestPath}`);
 			fp = `${this._wwwroot}/${requestPath}`;
 			isE = await U.isExistFile(fp);
 		} else {
-			L('getPhysPathInWwwroot 3 requestPath===/:' + INDEX_FILES);
+			D(`getPhysPathInWwwroot 3 requestPath===/:${INDEX_FILES}`);
 			for (const fn of INDEX_FILES) {
 				fp = `${this._wwwroot}/${fn}`;
 				L('getPhysPathInWwwroot 4 fp:' + fp);
