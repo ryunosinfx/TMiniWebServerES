@@ -1,8 +1,5 @@
 import { Vw } from './Vw.js';
-const WS_URL = 'http://localhost:8080/ws/test', // /終わりでないこと
-	m1 = { margin: '1px' },
-	m10 = { margin: '10px' },
-	t4 = { margin: '5px 0px 2px 0px' };
+import { WS_URL, m1, m10, t4 } from './const.js';
 class WSClient {
 	static socket = null;
 	static connect(url, callback) {
@@ -31,9 +28,6 @@ class MV {
 		const frame = Vw.add(null, 'div', {}, m10),
 			body = document.getElementsByTagName('body')[0];
 		body.appendChild(frame);
-
-		//----------------------------------------------------------------------------------------
-
 		Vw.add(frame, 'h1', { text: 'WebSocket Test' }, t4);
 		Vw.add(frame, 'hr');
 		const form1 = Vw.add(frame, 'form', { action: './', method: 'GET', onsubmit: 'return false;' }),
