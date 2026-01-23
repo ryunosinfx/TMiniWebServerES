@@ -137,6 +137,7 @@ $ npm run build
 # パッケージに必要なモジュールを取得
 $ sudo npm run wwwload # wwwroot配下を反映
 $ sudo npm run flash # ビルドしたファイルを反映
+$ sudo npm run build_flash # ビルド&ファイルを反映
 ```
 
 ### wifiでのIPアドレスの確認（DHCPのクライアントとしてのみ作動）
