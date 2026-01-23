@@ -1,74 +1,74 @@
 import { Vw, C } from './Vw.js';
-const WS_URL = 'http://localhost:8080/ws/chat/room1'; // /終わりでないこと。
-const m1 = { margin: '1px' };
-const m1Textarea = { margin: '1px', width: '90vw', height: '2em' };
-const m1w100 = { margin: '1px', width: '100px' };
-const m1w120 = { margin: '1px', width: '100px' };
-const m1Flex = { margin: '1px', display: 'flex' };
-const m10 = { margin: '10px' };
-const t4 = { margin: '5px 0px 2px 0px' };
-const names = [
-	'PONTA',
-	'PONKICHI',
-	'PONSUKE',
-	'PONJIRO',
-	'PONKO',
-	'PONMI',
-	'PONPON',
-	'PONKEI',
-	'PONSHIROU',
-	'PONPOKO',
-	'PONYA',
-	'PONKA',
-	'PONMURA',
-	'PONGAMI',
-	'PONBARA',
-	'PONNAKA',
-	'PONCHAN',
-	'PONSAMA',
-	'PONYAROU',
-	'PONZAWA',
-	'PONYAMA',
-	'PONKAWA',
-	'PONROU',
-	'PONNOMIYA',
-	'PONAKI',
-	'PONHIRO',
-	'PONMASA',
-	'PONJI',
-	'PONKAGA',
-	'PONNOSE',
-	'PONGAWARA',
-	'PONGI',
-	'PONNOKI',
-	'PONJOU',
-	'PONJIMA',
-	'PONGASHIRA',
-	'PONNOJOU',
-	'PONSUGI',
-	'PONNOIN',
-	'PONBAYASHI',
-	'PNMORI',
-	'PONTANI',
-	'PONBUCHI',
-	'PONNAMI',
-	'PONZATO',
-	'PONMATSU',
-	'PONROGI',
-	'PONZAKI',
-	'PONNO',
-	'PONDA',
-	'PONNOJI',
-	'PONMAKI',
-	'PONGAHAMA',
-	'PONDO',
-	'PONNOGI',
-	'PONGUCHI',
-	'PONWAKA',
-	'PONMACHI',
-	'PONJOUJI',
-];
-const cmds = { CHAT: 'C', ENTER: 'E', LEAVE: 'L' };
+const WS_URL = 'http://localhost:8080/ws/chat/room1', // /終わりでないこと。
+	m1 = { margin: '1px' },
+	m1Textarea = { margin: '1px', width: '90vw', height: '2em' },
+	m1w100 = { margin: '1px', width: '100px' },
+	m1w120 = { margin: '1px', width: '100px' },
+	m1Flex = { margin: '1px', display: 'flex' },
+	m10 = { margin: '10px' },
+	t4 = { margin: '5px 0px 2px 0px' },
+	names = [
+		'PONTA',
+		'PONKICHI',
+		'PONSUKE',
+		'PONJIRO',
+		'PONKO',
+		'PONMI',
+		'PONPON',
+		'PONKEI',
+		'PONSHIROU',
+		'PONPOKO',
+		'PONYA',
+		'PONKA',
+		'PONMURA',
+		'PONGAMI',
+		'PONBARA',
+		'PONNAKA',
+		'PONCHAN',
+		'PONSAMA',
+		'PONYAROU',
+		'PONZAWA',
+		'PONYAMA',
+		'PONKAWA',
+		'PONROU',
+		'PONNOMIYA',
+		'PONAKI',
+		'PONHIRO',
+		'PONMASA',
+		'PONJI',
+		'PONKAGA',
+		'PONNOSE',
+		'PONGAWARA',
+		'PONGI',
+		'PONNOKI',
+		'PONJOU',
+		'PONJIMA',
+		'PONGASHIRA',
+		'PONNOJOU',
+		'PONSUGI',
+		'PONNOIN',
+		'PONBAYASHI',
+		'PNMORI',
+		'PONTANI',
+		'PONBUCHI',
+		'PONNAMI',
+		'PONZATO',
+		'PONMATSU',
+		'PONROGI',
+		'PONZAKI',
+		'PONNO',
+		'PONDA',
+		'PONNOJI',
+		'PONMAKI',
+		'PONGAHAMA',
+		'PONDO',
+		'PONNOGI',
+		'PONGUCHI',
+		'PONWAKA',
+		'PONMACHI',
+		'PONJOUJI',
+	],
+	cmds = { CHAT: 'C', ENTER: 'E', LEAVE: 'L' };
 class WSClient {
 	constructor() {
 		this.socket = null;
@@ -77,17 +77,17 @@ class WSClient {
 	}
 	connect(url, userId = '') {
 		if (this.userId) return; //再利用防止
-		const socket = new WebSocket(url);
-		socket.addEventListener('open', event => {
-			console.log(`event:${event}/send InitMsg:${userId}`);
-			socket.send(WSClient.makeMsg(cmds.ENTER, userId, ''));
+		const s = new WebSocket(url);
+		s.addEventListener('open', evt => {
+			console.log(`event:${evt}/send InitMsg:${userId}`);
+			s.send(WSClient.makeMsg(cmds.ENTER, userId, ''));
 			this.onOpen();
 		});
-		this.socket = socket;
+		this.socket = s;
 		this.userId = userId;
-		socket.addEventListener('message', data => this.onChat(data));
-		socket.addEventListener('close', () => this.onClose());
-		socket.addEventListener('error', () => this.onError());
+		s.addEventListener('message', data => this.onChat(data));
+		s.addEventListener('close', () => this.onClose());
+		s.addEventListener('error', () => this.onError());
 	}
 	send(msg) {
 		return this.socket ? this.socket.send(msg) : null;
@@ -117,38 +117,37 @@ export class ESWsMainView {
 		this.hash = location.hash;
 	}
 	async build() {
-		const frame = Vw.add(null, 'div', {}, m10);
-		const body = document.getElementsByTagName('body')[0];
+		const frame = Vw.add(null, 'div', {}, m10),
+			body = document.getElementsByTagName('body')[0];
 		body.appendChild(frame);
 
 		Vw.add(frame, 'h1', { t: 'WebSocket Chat' }, t4);
 		Vw.add(frame, 'hr');
-		const form1 = Vw.add(frame, 'form', { action: './', method: 'GET', onsubmit: 'return false;' });
-		const rowCurlWS = Vw.add(form1, 'div', {}, m10);
-		const colCurlWS1 = Vw.add(rowCurlWS, 'div', {}, m1);
+		const form1 = Vw.add(frame, 'form', { action: './', method: 'GET', onsubmit: 'return false;' }),
+			rowCurlWS = Vw.add(form1, 'div', {}, m10),
+			colCurlWS1 = Vw.add(rowCurlWS, 'div', {}, m1);
 		Vw.add(colCurlWS1, 'h4', { t: 'URL' }, t4);
-		const input1url = Vw.add(colCurlWS1, 'input', { n: 'inputUrl' }, { margin: '5px', width: '90vw' });
-		const rowCurlWSDetail = Vw.add(form1, 'div', {}, m10);
-		const colCurlWSDetail = Vw.add(rowCurlWSDetail, 'div', {}, m1);
+		const input1url = Vw.add(colCurlWS1, 'input', { n: 'inputUrl' }, { margin: '5px', width: '90vw' }),
+			rowCurlWSDetail = Vw.add(form1, 'div', {}, m10),
+			colCurlWSDetail = Vw.add(rowCurlWSDetail, 'div', {}, m1);
 		Vw.add(colCurlWSDetail, 'p', { t: '/ws/chat/<roomId> です' }, t4);
 
 		input1url.value = WS_URL;
 
-		const rowLoginId = Vw.add(form1, 'div', {}, m10);
-		const colLoginIdLabel = Vw.add(rowLoginId, 'div', {}, m1);
+		const rowLoginId = Vw.add(form1, 'div', {}, m10),
+			colLoginIdLabel = Vw.add(rowLoginId, 'div', {}, m1);
 		Vw.add(colLoginIdLabel, 'p', { t: 'ログインID' }, m1);
-		const colLoginId = Vw.add(rowLoginId, 'div', {}, m1);
-
-		const inputLoginId = Vw.add(colLoginId, 'input', { n: 'userId' }, { margin: '5px', width: '90vw' });
-		const rowCTextWS = Vw.add(form1, 'div', {}, m10);
-		const colG2 = Vw.add(rowCTextWS, 'div', {}, m1);
+		const colLoginId = Vw.add(rowLoginId, 'div', {}, m1),
+			inputLoginId = Vw.add(colLoginId, 'input', { n: 'userId' }, { margin: '5px', width: '90vw' }),
+			rowCTextWS = Vw.add(form1, 'div', {}, m10),
+			colG2 = Vw.add(rowCTextWS, 'div', {}, m1);
 		Vw.add(colG2, 'h4', { t: 'Message' }, t4);
-		const textarea1 = Vw.add(colG2, 'textarea', { t: '' }, m1Textarea);
-		const rowCBtntWS = Vw.add(form1, 'div', {}, m10);
-		const colG3 = Vw.add(rowCBtntWS, 'div', {}, m1Flex);
-		const buttonLogin = Vw.add(colG3, 'button', { t: '入室' }, m1);
-		const buttonLogOut = Vw.add(colG3, 'button', { t: '退室' }, m1);
-		const buttonEmit = Vw.add(colG3, 'button', { t: '投稿' }, m1);
+		const textarea1 = Vw.add(colG2, 'textarea', { t: '' }, m1Textarea),
+			rowCBtntWS = Vw.add(form1, 'div', {}, m10),
+			colG3 = Vw.add(rowCBtntWS, 'div', {}, m1Flex),
+			buttonLogin = Vw.add(colG3, 'button', { t: '入室' }, m1),
+			buttonLogOut = Vw.add(colG3, 'button', { t: '退室' }, m1),
+			buttonEmit = Vw.add(colG3, 'button', { t: '投稿' }, m1);
 		Vw.styleSet(buttonLogOut, C.dNone);
 		Vw.styleSet(buttonEmit, C.dNone);
 		const conn = {};
@@ -158,14 +157,14 @@ export class ESWsMainView {
 			textarea1.value = '';
 		});
 		Vw.styleSet(colG2, C.dNone);
-		const rowCLogWS = Vw.add(form1, 'div', {}, m10);
-		const colWSlog = Vw.add(rowCLogWS, 'div', {}, { margin: '12px', whiteSpace: 'pre', fontSize: '60%' });
-		const joinFunc = () => {
-			Vw.styleSet(buttonLogin, C.dNone);
-			Vw.styleSet(buttonLogOut, C.dBlock);
-			Vw.styleSet(buttonEmit, C.dBlock);
-			Vw.styleSet(colG2, C.dBlock);
-		};
+		const rowCLogWS = Vw.add(form1, 'div', {}, m10),
+			colWSlog = Vw.add(rowCLogWS, 'div', {}, { margin: '12px', whiteSpace: 'pre', fontSize: '60%' }),
+			joinFunc = () => {
+				Vw.styleSet(buttonLogin, C.dNone);
+				Vw.styleSet(buttonLogOut, C.dBlock);
+				Vw.styleSet(buttonEmit, C.dBlock);
+				Vw.styleSet(colG2, C.dBlock);
+			};
 		const onChatFunc = data => {
 			ESWsMainView.add(colWSlog, data);
 		};
