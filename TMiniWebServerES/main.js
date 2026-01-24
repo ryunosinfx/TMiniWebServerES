@@ -176,7 +176,7 @@ wifi.connect(err => {
 
 		try {
 			(async () => {
-				//await HttpPinger.ping();
+				await HttpPinger.ping();
 				// eslint-disable-next-line no-undef
 				L(`####1#getConnection ip:${storage.getItem('ip')}######`);
 				await awaitF(1000);
