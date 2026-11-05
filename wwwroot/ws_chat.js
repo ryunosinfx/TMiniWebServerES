@@ -79,22 +79,22 @@ export class ESWsMainView {
 			buttonLogin = Vw.add(colG3, 'button', { t: '入室' }, m1),
 			buttonLogOut = Vw.add(colG3, 'button', { t: '退室' }, m1),
 			buttonEmit = Vw.add(colG3, 'button', { t: '投稿' }, m1);
-		Vw.styleSet(buttonLogOut, C.dNone);
-		Vw.styleSet(buttonEmit, C.dNone);
+		Vw.sS(buttonLogOut, C.dNone);
+		Vw.sS(buttonEmit, C.dNone);
 		const conn = {};
 		Vw.click(buttonEmit, () => {
 			const v = textarea1.value;
 			conn.wsc && conn.wsc.chat(v);
 			textarea1.value = '';
 		});
-		Vw.styleSet(colG2, C.dNone);
+		Vw.sS(colG2, C.dNone);
 		const rowCLogWS = Vw.add(form1, 'div', {}, m10),
 			colWSlog = Vw.add(rowCLogWS, 'div', {}, { margin: '12px', whiteSpace: 'pre', fontSize: '60%' }),
 			joinFunc = () => {
-				Vw.styleSet(buttonLogin, C.dNone);
-				Vw.styleSet(buttonLogOut, C.dBlock);
-				Vw.styleSet(buttonEmit, C.dBlock);
-				Vw.styleSet(colG2, C.dBlock);
+				Vw.sS(buttonLogin, C.dNone);
+				Vw.sS(buttonLogOut, C.dBlock);
+				Vw.sS(buttonEmit, C.dBlock);
+				Vw.sS(colG2, C.dBlock);
 			};
 		const onChatFunc = data => {
 			ESWsMainView.add(colWSlog, data);
@@ -116,10 +116,10 @@ export class ESWsMainView {
 		});
 		const logoutFunc = () => {
 			console.log('logoutFunc');
-			Vw.styleSet(colG2, C.dNone);
-			Vw.styleSet(buttonLogin, C.dBlock);
-			Vw.styleSet(buttonLogOut, C.dNone);
-			Vw.styleSet(buttonEmit, C.dNone);
+			Vw.sS(colG2, C.dNone);
+			Vw.sS(buttonLogin, C.dBlock);
+			Vw.sS(buttonLogOut, C.dNone);
+			Vw.sS(buttonEmit, C.dNone);
 		};
 		Vw.click(buttonLogOut, () => {
 			conn.wsc && conn.wsc.logout(logoutFunc);

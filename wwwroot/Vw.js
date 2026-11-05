@@ -8,6 +8,7 @@ export class C {
 	static a = 'absolute';
 	static dNone = { display: 'none' };
 	static dBlock = { display: 'block' };
+	static dInline = { display: 'inline' };
 	static vH = { visibility: 'hidden' };
 	static vV = { visibility: 'visible' };
 }
@@ -28,7 +29,7 @@ export class Vw {
 		const e = Vw.ce(tN);
 		Vw.sa(e, att);
 		if (att.text || att.t) Vw.sT(e, att.text || att.t);
-		Vw.styleSet(e, sty);
+		Vw.sS(e, sty);
 		if (p) p.appendChild(e);
 		return e;
 	}
@@ -43,8 +44,11 @@ export class Vw {
 	static rc = e => {
 		while (e.firstChild) e.removeChild(e.firstChild);
 	};
-	static styleSet = (e, sty = {}) => Object.keys(sty).map(k => (e.style[Vw.cnvtGebav2Camel(k)] = sty[k])); // stypeSet
-	static styleAdd = (e, k, v) => (e.style[Vw.cnvtGebav2Camel(k)] = v); //stypeAdd
+	static sS = (e, sty = {}) => Object.keys(sty).map(k => (e.style[Vw.cnvtGebav2Camel(k)] = sty[k])); // stypeSet
+	static sA = (e, k, v) => (e.style[Vw.cnvtGebav2Camel(k)] = v); //stypeAdd
+	static dN = e => Vw.sS(e, C.dNone);
+	static dB = e => Vw.sS(e, C.dBlock);
+	static dI = e => Vw.sS(e, C.dInline);
 	static getStyle = (e, k) => e.style[Vw.cnvtGebav2Camel(k)]; // GetStyle
 	static toggleStyle = (e, k, v, v2) =>
 		(e.style[Vw.cnvtGebav2Camel(k)] = e.style[Vw.cnvtGebav2Camel(k)] === v ? v2 : v); //toggleStyle
@@ -98,7 +102,7 @@ export class Vw {
 			T = 'top',
 			L = 'left',
 			a = k => Vw.getStyle(e, k).split(p).join(E) * 1,
-			b = (k, x) => Vw.styleAdd(e, k, x + p),
+			b = (k, x) => Vw.sA(e, k, x + p),
 			m = {},
 			f = evt => {
 				st(() => {
@@ -109,7 +113,7 @@ export class Vw {
 				}, 1);
 			};
 		Vw.ael(e, 'mousedown', async evt => {
-			Vw.styleAdd(e, 'cursor', 'grab');
+			Vw.sA(e, 'cursor', 'grab');
 			m.x = a(L);
 			m.y = a(T);
 			m.sX = evt.clientX;
@@ -117,7 +121,7 @@ export class Vw {
 			Vw.ael(wi, 'mousemove', f);
 		});
 		Vw.ael(wi, 'mouseup', () => {
-			Vw.styleAdd(e, 'cursor', 'auto');
+			Vw.sA(e, 'cursor', 'auto');
 			Vw.rel(wi, 'mousemove', f);
 		});
 	}
