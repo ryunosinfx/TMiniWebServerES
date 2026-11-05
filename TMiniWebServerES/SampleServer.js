@@ -109,31 +109,34 @@ const Chat = {
  * Chat
  *
  */
-TMWS.withWS('/ws/chat/<roomId>', async (websocket, u8a, routeArgs) => {
+TMWS.withWS('/ws/chat/<roomId>', async (ws, u8a, routeArgs) => {
 	try {
 		let isFirst = false;
-		if (websocket.onClose !== Chat.onClose) {
-			websocket.onClose = Chat.onClose;
+		if (ws.onClose !== Chat.onClose) {
+			ws.onClose = Chat.onClose;
 			isFirst = true;
 		}
-		const ps = websocket.props;
 		D('withWS routeArgs:', routeArgs);
-		const LH = '[SAMPLE SERVER@/ws/chat] ',
+		const ps = ws.props,
+			LH = '[SAMPLE SERVER@/ws/chat] ',
 			rId = routeArgs ? routeArgs.roomId : null,
-			[d, mt] = await websocket.receive(u8a);
+			[d, mt] = await ws.receive(u8a);
 		ps.roomId = rId;
 		D(`${LH}received: ${d}/${mt}`);
-		if (!rId) return await websocket.send({ msg: LH + 'ROOM NOT FOUND!!!' });
-		if (!d && !isFirst) return await websocket.send({ msg: LH + 'DATA NOT FOUND!!!' });
+		if (!rId) return await ws.send({ msg: LH + 'ROOM NOT FOUND!!!' });
+		if (!d && !isFirst) return await ws.send({ msg: LH + 'DATA NOT FOUND!!!' });
 		try {
 			const o = JSON.parse(d);
-			if (!o.cmd || !o.userId)
-				return (await websocket.send({ msg: LH + 'CMD NOT FOUND!!!' })) && websocket.close();
+			if (!o.cmd || !o.userId) return (await ws.send({ msg: LH + 'CMD NOT FOUND!!!' })) && ws.close();
 			const uId = o.userId;
 			ps.userId = uId;
-			if (o.cmd === Chat.cmds.CHAT) Chat.chat(rId, uId, o.msg);
-			else if (o.cmd === Chat.cmds.ENTER) await Chat.enterRoom(rId, uId, websocket);
-			else if (o.cmd === Chat.cmds.LEAVE) await Chat.leaveRoom(rId, uId, websocket);
+			return o.cmd === Chat.cmds.CHAT
+				? Chat.chat(rId, uId, o.msg)
+				: o.cmd === Chat.cmds.ENTER
+					? await Chat.enterRoom(rId, uId, ws)
+					: o.cmd === Chat.cmds.LEAVE
+						? await Chat.leaveRoom(rId, uId, ws)
+						: null;
 		} catch (e) {
 			D(e);
 		}

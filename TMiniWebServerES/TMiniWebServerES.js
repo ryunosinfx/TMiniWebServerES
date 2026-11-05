@@ -9,7 +9,7 @@ const U = TMiniWebServerUtil,
 	INDEX_FILES = ['index.html', 'index.htm'],
 	AT = ['string', 'number'],
 	MAX_CONN = 10,
-	EXPIRE_DURATION = 24 * 60 * 60 * 1000,
+	EXPIRE_DURATION = 6 * 60 * 60 * 1000,
 	TMP_ARR = [],
 	ROUT_HEADERS = [],
 	SERVERS = {};
@@ -105,7 +105,12 @@ export class TMiniWebServerES {
 					a[k] = c;
 					s.on('data', u8a => c._processRequest(u8a));
 					s.on('end', evt => L('end event:', evt) && c.onEnd());
-					s.on('close', evt => L('close event:', evt) && TMWS.deleteExpireConns(a) && c.onClose(evt));
+					s.on('close', evt => {
+						L('close event:', evt);
+						c.onClose(evt);
+						c.destroy();
+						delete a[k];
+					});
 					s.on('drain', evt => L('drain event:', evt) && c.onDrain());
 					L(`writableLength:${s.writableLength} writableNeedDrain:${s.writableNeedDrain}`);
 
@@ -347,6 +352,7 @@ const TWL = {
 		if (length > 0) {
 			await TWL.writeContentTypeHeader(s, contentType, charset, headers4Send);
 			await TWL.writeHeader(s, 'content-length', length, headers4Send);
+			await TWL.writeHeader(s, 'Content-Security-Policy:', "img-src 'self' data:", headers4Send);
 		}
 		await TWL.write(s, '\r\n');
 	},
@@ -392,10 +398,18 @@ class TMiniWebClient {
 		z.tMWS = null;
 		z._server = server;
 		z.url = null;
+		z.expireTimer = setTimeout(() => {
+			if (z.socket && !z.socket.destroyed) {
+				L('Connection exceeded maximum lifetime; closing socket');
+				z.socket.destroy();
+			}
+		}, EXPIRE_DURATION);
 	}
 	destroy() {
 		const z = this,
 			r = z.routeArgs;
+		clearTimeout(z.expireTimer);
+		delete z.expireTimer;
 		for (const k in z.routeArgs) delete r[k];
 		delete z.routeArgs;
 		delete z.socket;
