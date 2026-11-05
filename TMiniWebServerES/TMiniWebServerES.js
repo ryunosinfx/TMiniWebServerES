@@ -404,6 +404,16 @@ class TMiniWebClient {
 				z.socket.destroy();
 			}
 		}, EXPIRE_DURATION);
+		z.headers = null;
+	}
+	/**
+	 * ルートハンドラー公開 API。README 記載の client.writeResponse(content, status, headers) に対応させる。
+	 * @param {string|number|Uint8Array} content
+	 * @param {number} httpStatus
+	 * @param {object} headers
+	 */
+	writeResponse(content, httpStatus = HttpStatusCode.OK, headers = {}) {
+		return TWL.writeResponse(this.socket, content, headers, httpStatus);
 	}
 	destroy() {
 		const z = this,
@@ -419,6 +429,7 @@ class TMiniWebClient {
 			delete z.tMWS;
 		}
 		delete z.lastCalledRouteFunc;
+		delete z.headers;
 	}
 	async close() {
 		const s = this.socket,
@@ -455,8 +466,9 @@ class TMiniWebClient {
 				hl = Object.keys(hs).length;
 			if (hl > 0) {
 				const ug = TWL.checkUpgrade(hs);
+				this.headers = hs;
 				return !ug
-					? await this.routingHttp(method, url, reqPath, rows)
+					? await this.routingHttp(method, url, reqPath)
 					: ug === WS // WebSocket
 						? await this._routingWebsocket(reqPath, u8a, hs)
 						: await TWL.writeBadRequest(s);
@@ -465,7 +477,7 @@ class TMiniWebClient {
 		else await TWL.writeInternalServerError(s);
 		return L('at _processRequest: false:' + false) || false;
 	}
-	async routingHttp(method, url, reqPath, rows) {
+	async routingHttp(method, url, reqPath) {
 		D(`at routingHttp: START reqPath:${reqPath} url:${url}`);
 		const s = this.socket,
 			{ routFunc, routeArgs } = this._server.getRouteHandler(reqPath, this._server.routeHeaders, method);
@@ -473,7 +485,7 @@ class TMiniWebClient {
 		if (routFunc) {
 			D(`at routingHttp:found reqPath: ${reqPath}, args: `, routeArgs);
 			try {
-				await routFunc(rows, routeArgs ? routeArgs : this);
+				await routFunc(this, routeArgs ? routeArgs : {});
 			} catch (ex) {
 				D(`at routingHttp:Throw Exception in exec routeFunc: ${ex}`);
 			}
