@@ -9,6 +9,9 @@ const U = TMiniWebServerUtil,
 	INDEX_FILES = ['index.html', 'index.htm'],
 	AT = ['string', 'number'],
 	MAX_CONN = 10,
+	// WebSocket の受信 1 メッセージ上限（細分化メッセージの断片合計・ペイロード byte 数）。
+	// Kaluma 実機のメモリ事情を確認したら、この定数だけを調整すること。
+	MAX_MSG_SIZE = 16 * 1024,
 	EXPIRE_DURATION = 6 * 60 * 60 * 1000,
 	TMP_ARR = [],
 	ROUT_HEADERS = [],
@@ -639,45 +642,50 @@ const BT = {
 				if (u[i] === 13 && u[i + 1] === 10 && u[i + 2] === 13 && u[i + 3] === 10) return i;
 			return -1;
 		},
-		// フレーム全体の総 byte 数。バッファが不完全なら null（次の受信を待つ）を返す。#新
-		_frameSize: u8a => {
-			if (u8a.length < 2) return null;
-			const h1 = u8a[1],
+		// オフセット i のフレームヘッダを解釈。{ len: 宣言ペイロード長, size: フレーム総 byte 数 } を返す。
+		// ヘッダ自体が未完なら null、ペイロード未完なら { len, size: null }。#新
+		_frameSize: (u8a, i = 0) => {
+			if (i + 2 > u8a.length) return null;
+			const h1 = u8a[i + 1],
 				l1 = h1 & 0x7f,
 				hasMask = (h1 & 0x80) === 0x80;
 			let hdr = 2,
 				len = l1;
 			if (l1 === 126) {
-				if (u8a.length < 4) return null;
-				len = Y.be2i(u8a.subarray(2, 4));
+				if (i + 4 > u8a.length) return null;
+				len = Y.be2i(u8a.subarray(i + 2, i + 4));
 				hdr = 4;
 			} else if (l1 === 127) {
-				if (u8a.length < 10) return null;
-				len = Y.be2i(u8a.subarray(2, 10));
+				if (i + 10 > u8a.length) return null;
+				len = Y.be2i(u8a.subarray(i + 2, i + 10));
 				hdr = 10;
 			}
-			const o2 = hasMask ? hdr + 4 : hdr;
-			return u8a.length >= o2 + len ? o2 + len : null;
+			const o2 = i + hdr + (hasMask ? 4 : 0);
+			return { len, size: u8a.length >= o2 + len ? o2 + len - i : null };
 		},
 		// #RFC6455: 細分化メッセージを考慮し、バッファ内で「完結した 1 メッセージ
 		// （fin=true のデータフレームまで）」または単一の制御フレームに必要な総 byte 数を返す。
 		// 未完了なら null（次の受信を待つ）。制御フレーム（PING/CLOSE）は断片間に混在可能（RFC 6455 §5.4/§5.5）。
 		_messageSize: u8a => {
 			let i = 0,
-				frag = false; // 細分化メッセージの途中か
+				frag = false, // 細分化メッセージの途中か
+				msgBytes = 0; // 当該メッセージの断片合計ペイロード長
 			for (;;) {
-				const view = u8a.subarray(i),
-					size = TWS._frameSize(view);
-				if (size === null) return null;
-				const op = view[0] & 0x0f,
-					fin = (view[0] & 0x80) !== 0;
+				const f = TWS._frameSize(u8a, i);
+				if (f === null) return null;
+				const op = u8a[i] & 0x0f,
+					fin = (u8a[i] & 0x80) !== 0;
+				// #16KB: 宣言長が単独でも断片合計でも上限超過 → 蓄積を待たず即拒否（DoS 対策）
+				if (f.len > MAX_MSG_SIZE || (op < 8 && msgBytes + f.len > MAX_MSG_SIZE)) return -1;
+				if (f.size === null) return null; // ペイロード未完: 次の受信を待つ（上限判定は済んでいる）
 				if (op >= 8) {
 					// 制御フレーム: 断片途中でなければ単独でディスパッチ可能（PING 応答/CLOSE 処理）
-					if (!frag) return i + size;
-					i += size;
+					if (!frag) return i + f.size;
+					i += f.size;
 					continue;
 				}
-				i += size;
+				msgBytes += f.len;
+				i += f.size;
 				if (frag) {
 					if (fin) return i; // 細分化メッセージ完結
 				} else if (fin) return i; // 単一フレームメッセージ
@@ -741,11 +749,19 @@ export class TMiniWebSocket {
 		this._buf = null; // #新: マルチパケットで分割到着するフレームの蓄積バッファ
 	}
 	// 受信データを蓄積し、完結した 1 メッセージ（または制御フレーム）が揃っていれば
-	// その総 byte 数、そうでなければ null を返す
+	// その総 byte 数、未完なら 0 を返す。上限超過なら close(1009) を送り 0 を返す。#16KB
 	_bufferMessage(u8a) {
 		const z = this;
 		if (u8a && u8a.length) z._buf = z._buf ? Y.jud(z._buf, u8a) : u8a;
-		return z._buf ? TWS._messageSize(z._buf) : null;
+		if (!z._buf) return 0;
+		const ms = TWS._messageSize(z._buf);
+		if (ms !== null && ms < 0) {
+			L(`[WARN] WS message exceeds MAX_MSG_SIZE(${MAX_MSG_SIZE}): close(1009)`);
+			z._buf = null; // 超過データの蓄積を破棄
+			z.rejectOversize(); // fire-and-forget（sendCore は async）
+			return 0;
+		}
+		return ms || 0;
 	}
 	isClosed() {
 		return this._closed;
@@ -759,11 +775,21 @@ export class TMiniWebSocket {
 		delete this.props;
 		delete this._buf;
 	}
-	async close() {
+	async close(code) {
 		try {
-			await this.sendCore(Opcode.CLOSE, null);
+			// code 指定時は close frame に 2 byte BE のステータスコードを載せる（RFC 6455 §5.5.1）
+			await this.sendCore(Opcode.CLOSE, code ? Y.i2be(code, 2) : null);
 		} catch (e) {
 			D('at close: throw Exception e:', e);
+		}
+		this._closed = true;
+	}
+	// #16KB: メッセージが MAX_MSG_SIZE 超過 → RFC 6455 §7.4.1 に従い close(1009 Message Too Big)
+	async rejectOversize() {
+		try {
+			await this.sendCore(Opcode.CLOSE, Y.i2be(1009, 2));
+		} catch (e) {
+			D('at rejectOversize:', e);
 		}
 		this._closed = true;
 	}
@@ -789,6 +815,12 @@ export class TMiniWebSocket {
 			// ここで消費した領域は必ず完結している。
 			const msgSize = TWS._messageSize(z._buf);
 			if (msgSize === null) return NULL_NULL_ARRAY; // 未完了: 次の受信を待つ
+			if (msgSize < 0) {
+				// #16KB: 直接 receive() を呼ぶ旧来経路でも同じ上限保護を適用
+				z._buf = null;
+				await z.rejectOversize();
+				return NULL_NULL_ARRAY;
+			}
 			const parts = [];
 			let type = null,
 				off = 0;
