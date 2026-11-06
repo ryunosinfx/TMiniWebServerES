@@ -505,7 +505,7 @@ class TMiniWebClient {
 			// #新: 蓄積バッファへ追加し、完全なフレームが揃うたびにハンドラーを 1 フレーム分呼ぶ
 			// （分割到着の合算 / 同一パケット内の複数フレーム対応）
 			let guard = -1;
-			while (t._bufferFrame(u8a) && t._buf && t._buf.length !== guard) {
+			while (t._bufferMessage(u8a) && t._buf && t._buf.length !== guard) {
 				guard = t._buf.length;
 				await z.lastCalledRouteFunc(EMPTY_U8A); // receive() は蓄積分を消費する
 				u8a = null;
@@ -600,7 +600,7 @@ class TMiniWebClient {
 				// #新: 同梱バイトも蓄積し、完全なフレームが揃った時点でハンドラーを呼ぶ（分割到着対応）
 				let tail = u8a.subarray(hdrEnd + 4),
 					guard = -1;
-				while (tMWS._bufferFrame(tail) && tMWS._buf && tMWS._buf.length !== guard) {
+				while (tMWS._bufferMessage(tail) && tMWS._buf && tMWS._buf.length !== guard) {
 					guard = tMWS._buf.length;
 					await routFunc(tMWS, EMPTY_U8A, routeArgs); // receive() が蓄積分を消費する
 					tail = null; // 追加は最初の 1 度だけ
@@ -659,6 +659,31 @@ const BT = {
 			const o2 = hasMask ? hdr + 4 : hdr;
 			return u8a.length >= o2 + len ? o2 + len : null;
 		},
+		// #RFC6455: 細分化メッセージを考慮し、バッファ内で「完結した 1 メッセージ
+		// （fin=true のデータフレームまで）」または単一の制御フレームに必要な総 byte 数を返す。
+		// 未完了なら null（次の受信を待つ）。制御フレーム（PING/CLOSE）は断片間に混在可能（RFC 6455 §5.4/§5.5）。
+		_messageSize: u8a => {
+			let i = 0,
+				frag = false; // 細分化メッセージの途中か
+			for (;;) {
+				const view = u8a.subarray(i),
+					size = TWS._frameSize(view);
+				if (size === null) return null;
+				const op = view[0] & 0x0f,
+					fin = (view[0] & 0x80) !== 0;
+				if (op >= 8) {
+					// 制御フレーム: 断片途中でなければ単独でディスパッチ可能（PING 応答/CLOSE 処理）
+					if (!frag) return i + size;
+					i += size;
+					continue;
+				}
+				i += size;
+				if (frag) {
+					if (fin) return i; // 細分化メッセージ完結
+				} else if (fin) return i; // 単一フレームメッセージ
+				else frag = true; // fin=false: ここから細分化開始
+			}
+		},
 		_readFrame: (buff = new Uint8Array(1)) => {
 			if (buff.length < 2) {
 				L('at _readFrame:Invalid WebSocket frame header');
@@ -715,11 +740,12 @@ export class TMiniWebSocket {
 		this.props = {};
 		this._buf = null; // #新: マルチパケットで分割到着するフレームの蓄積バッファ
 	}
-	// 受信データを蓄積し、完全なフレームが揃っていればその総 byte 数、そうでなければ null を返す
-	_bufferFrame(u8a) {
+	// 受信データを蓄積し、完結した 1 メッセージ（または制御フレーム）が揃っていれば
+	// その総 byte 数、そうでなければ null を返す
+	_bufferMessage(u8a) {
 		const z = this;
 		if (u8a && u8a.length) z._buf = z._buf ? Y.jud(z._buf, u8a) : u8a;
-		return z._buf ? TWS._frameSize(z._buf) : null;
+		return z._buf ? TWS._messageSize(z._buf) : null;
 	}
 	isClosed() {
 		return this._closed;
@@ -755,20 +781,43 @@ export class TMiniWebSocket {
 	async receive(u8a) {
 		try {
 			const z = this;
-			// #新: 引数があれば蓄積へ追加（旧呼び出し形との互換）。無ければ蓄積済みバッファから1フレーム取り出す
+			// #新: 引数があれば蓄積へ追加（旧呼び出し形との互換）。無ければ蓄積済みバッファから取り出す
 			if (u8a && u8a.length) z._buf = z._buf ? Y.jud(z._buf, u8a) : u8a;
 			if (!z._buf) return NULL_NULL_ARRAY;
-			const size = TWS._frameSize(z._buf);
-			if (size === null) return NULL_NULL_ARRAY; // 分割到着: 次の受信を待つ
-			const { opcode, payload } = TWS._readFrame(z._buf.subarray(0, size)),
-				{ isSendRes, data, isClosed } = TWS._processFrame(opcode, payload);
-			z._buf = size < z._buf.length ? z._buf.subarray(size) : null; // 当該フレームを消費
-			z._closed = isClosed;
-			if (isClosed) return NULL_NULL_ARRAY;
-			if (isSendRes) await z.sendCore(isSendRes, data);
-			else if (data)
-				if (opcode === Opcode.BINARY) return [data, MessageType.BINARY];
-				else if (opcode === Opcode.TEXT) return [data, MessageType.TEXT];
+			// #RFC6455: 細分化メッセージは fin=true まで 1 メッセージとして組み立てる。
+			// ディスパッチ側は完結済みメッセージ/制御フレームが揃うまで呼ばないため、
+			// ここで消費した領域は必ず完結している。
+			const msgSize = TWS._messageSize(z._buf);
+			if (msgSize === null) return NULL_NULL_ARRAY; // 未完了: 次の受信を待つ
+			const parts = [];
+			let type = null,
+				off = 0;
+			while (off < msgSize) {
+				const f = TWS._readFrame(z._buf.subarray(off, msgSize)),
+					{ isSendRes, data, isClosed } = TWS._processFrame(f.opcode, f.payload);
+				off += f.size;
+				z._closed = isClosed;
+				if (isClosed) {
+					z._buf = z._buf.length > off ? z._buf.subarray(off) : null;
+					return NULL_NULL_ARRAY;
+				}
+				if (isSendRes) {
+					await z.sendCore(isSendRes, data); // PING → PONG 応答後、同一領域内の次フレームへ
+					continue;
+				}
+				if (f.opcode === Opcode.CONTINUE) {
+					if (type !== null) parts.push(f.payload);
+				} else if (f.opcode === Opcode.TEXT || f.opcode === Opcode.BINARY) {
+					type = f.opcode;
+					parts.length = 0;
+					parts.push(f.payload);
+				}
+			}
+			z._buf = z._buf.length > msgSize ? z._buf.subarray(msgSize) : null; // メッセージ領域を消費
+			if (type === null) return NULL_NULL_ARRAY; // 制御フレームのみ（PING 応答済み等）
+			const msg = parts.length === 1 ? parts[0] : Y.jus(parts);
+			if (type === Opcode.BINARY) return [msg, MessageType.BINARY];
+			return [Y.u2s(msg), MessageType.TEXT];
 		} catch (ex) {
 			this._closed = true;
 			return L(`[WARN] WebSocket closed. (exception : ${ex})`, ex) || NULL_NULL_ARRAY;
