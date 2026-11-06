@@ -14,7 +14,8 @@ export const B = {
 		isSameAb: (abA, abB) => Y.a2B(abA) === Y.a2B(abB), //バイナリ処理モジュール
 		isB64: (s = E) => s % 4 === 0 && /[+/=0-9a-zA-Z]+/.test(s),
 		s2u: s => te.encode(s),
-		u2s: u => td.decode(u),
+		// null/undefined 防御（decode(null) はエンジンにより例外）
+		u2s: u => td.decode(u || new Uint8Array(0)),
 		a2B: i => btoa(Y.u2b(B.u8(i.buffer ? i.buffer : i))),
 		u2B: u => btoa(Y.u2b(u)),
 		a2U: a => Y.B2U(Y.a2B(a)),
@@ -53,6 +54,9 @@ export const B = {
 			}
 			return u;
 		},
+		// RFC 6455 の拡張ペイロード長はビッグエンディアン（ネットワークバイトオーダ）
+		i2be: (i, l) => Y.i2u(i, l).reverse(),
+		be2i: u => Y.u2i(B.u8(u).reverse()),
 		u2i: u => {
 			const l = u.length > 7 ? 7 : u.length;
 			let j = 0;

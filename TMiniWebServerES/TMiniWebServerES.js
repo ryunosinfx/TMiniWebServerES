@@ -50,21 +50,29 @@ export const TMWS = {
 		}
 	},
 	deleteExpireConns: a => {
-		const ks = Object.keys(a);
-		ks.sort();
-		const l = ks.length;
+		const ks = Object.keys(a),
+			// key 先頭がミリ秒タイムスタンプなので文字列 sort でも古い順に並ぶ
+			l = ks.sort().length,
+			closeConn = c => {
+				// map から消すだけではソケットが残り続けるため、実際に閉じて接続上限を実効化させる
+				if (c.socket && !c.socket.destroyed) c.socket.destroy();
+				c.destroy();
+			};
+		// MAX_CONN 超過分は古い接続から閉じる
 		if (l > MAX_CONN)
-			for (let i = MAX_CONN; i < l; i++) {
+			for (let i = 0, over = l - MAX_CONN; i < over; i++) {
 				const k = ks[i],
 					c = a[k];
-				c.destroy();
-				delete a[k];
+				if (c) {
+					closeConn(c);
+					delete a[k];
+				}
 			}
 		const limit = Date.now() - EXPIRE_DURATION;
 		Object.keys(a).forEach(key => {
 			const c = a[key];
 			if (c && c.spawnTime < limit) {
-				c.destroy();
+				closeConn(c);
 				delete a[key];
 			}
 		});
@@ -103,15 +111,25 @@ export class TMiniWebServerES {
 					const c = new TMiniWebClient(s, z),
 						k = `${Date.now()}/${Math.random()}`;
 					a[k] = c;
+					TMWS.deleteExpireConns(a); // 接続直後も上限を即座に効かせる（バースト時の無制限化防止）
 					s.on('data', u8a => c._processRequest(u8a));
-					s.on('end', evt => L('end event:', evt) && c.onEnd());
+					// #4 修正: L() が常に undefined を返すため && 後が一度も実行されていなかった（close と同様に分離）
+					s.on('end', evt => {
+						L('end event:', evt);
+						c.onEnd();
+					});
 					s.on('close', evt => {
 						L('close event:', evt);
 						c.onClose(evt);
 						c.destroy();
 						delete a[k];
+						TMWS.deleteExpireConns(a);
 					});
-					s.on('drain', evt => L('drain event:', evt) && c.onDrain());
+					// #4 修正: drain も同じ && 短絡で不動だった
+					s.on('drain', evt => {
+						L('drain event:', evt);
+						c.onDrain();
+					});
 					L(`writableLength:${s.writableLength} writableNeedDrain:${s.writableNeedDrain}`);
 
 					L(`at serverProc:connected by ${s.remoteAddress ? s.remoteAddress : EMPTY}`);
@@ -119,6 +137,7 @@ export class TMiniWebServerES {
 					L(`[ERROR]at serverProc:process request failed.`, ex);
 				}
 			});
+		z._conns = a; // stop() から生存接続（と expireTimer）を解放するため
 		L('start 3');
 		svr.on('error', err => {
 			L('[ERROR] at server:', err);
@@ -140,6 +159,19 @@ export class TMiniWebServerES {
 			} catch (e) {
 				console.error(e);
 			}
+		// #N4 修正: stop() で生存接続を閉じないと expireTimer（6h）が残り、
+		// Node ではプロセスが終了まで居座り、Kaluma ではタイマーリソースを消費し続ける。
+		const conns = this._conns;
+		if (conns)
+			for (const k of Object.keys(conns)) {
+				const c = conns[k];
+				if (c) {
+					if (c.socket && !c.socket.destroyed) c.socket.destroy();
+					c.destroy(); // 内部で clearTimeout(z.expireTimer)
+					delete conns[k];
+				}
+			}
+		delete SERVERS[this.port]; // 同一ポートでの再起動を可能にする
 		this.isRunning = false;
 	}
 	isStarted() {
@@ -151,7 +183,7 @@ export class TMiniWebServerES {
 		const r = { routFunc: null, routeArgs: null };
 		try {
 			if (!routeHeaders) return r;
-			if (urlPath.endsWith('/')) urlPath = urlPath[-1];
+			if (urlPath.endsWith('/')) urlPath = urlPath.slice(0, -1); // #5 修正: urlPath[-1] は undefined を返していた
 			const mUC = method.toUpperCase();
 			for (const h of routeHeaders) {
 				if (h.method !== mUC) continue;
@@ -245,7 +277,8 @@ init();
 //TMiniWebLogic
 const TWL = {
 	parseFirstRow: async (line, u8a, lastCalledRouteFunc) => {
-		const p = {};
+		// #2 修正: params を常に初期化（未初期化だとクエリ付き URL で TypeError→500 になっていた）
+		const p = { params: {} };
 		try {
 			L(`at parseFirstRow: line:${line}`, lastCalledRouteFunc);
 			const elms = line.split(' ');
@@ -352,7 +385,7 @@ const TWL = {
 		if (length > 0) {
 			await TWL.writeContentTypeHeader(s, contentType, charset, headers4Send);
 			await TWL.writeHeader(s, 'content-length', length, headers4Send);
-			await TWL.writeHeader(s, 'Content-Security-Policy:', "img-src 'self' data:", headers4Send);
+			await TWL.writeHeader(s, 'Content-Security-Policy', "img-src 'self' data:", headers4Send);
 		}
 		await TWL.write(s, '\r\n');
 	},
@@ -405,6 +438,7 @@ class TMiniWebClient {
 			}
 		}, EXPIRE_DURATION);
 		z.headers = null;
+		z.params = null;
 	}
 	/**
 	 * ルートハンドラー公開 API。README 記載の client.writeResponse(content, status, headers) に対応させる。
@@ -430,14 +464,18 @@ class TMiniWebClient {
 		}
 		delete z.lastCalledRouteFunc;
 		delete z.headers;
+		delete z.params;
 	}
 	async close() {
-		const s = this.socket,
-			tMWS = this.tMWS,
+		const z = this,
+			tMWS = z.tMWS,
+			// socket は destroy() で削除されうるので 100ms 遅延後に再参照する
+			// （stop()/退避とレスポンス完了が競合すると s.destroyed で TypeError → プロセスクラッシュ）
 			f = r => {
+				const s = z.socket;
+				if (!s || s.destroyed) return r();
 				D('at close: TRY close!', [s.destroyed, s]);
 				tMWS && tMWS.setIsClosed();
-				if (s.destroyed) return r();
 				try {
 					s.end(EMPTY, () => D('close!') || r());
 				} catch (e) {
@@ -457,11 +495,30 @@ class TMiniWebClient {
 	}
 
 	async _processRequest(u8a) {
+		const z = this;
+		// #9 修正: WS アップグレード済みのソケットへ届くデータは全てフレーム。
+		// バイナリを HTTP リクエスト行として再パースすると、マスク済みバイト列に
+		// 空白が含まれた場合などに誤解釈するため、フレーム経路へ直送する。
+		if (z.lastCalledRouteFunc) {
+			const t = z.tMWS;
+			if (!t) return true;
+			// #新: 蓄積バッファへ追加し、完全なフレームが揃うたびにハンドラーを 1 フレーム分呼ぶ
+			// （分割到着の合算 / 同一パケット内の複数フレーム対応）
+			let guard = -1;
+			while (t._bufferFrame(u8a) && t._buf && t._buf.length !== guard) {
+				guard = t._buf.length;
+				await z.lastCalledRouteFunc(EMPTY_U8A); // receive() は蓄積分を消費する
+				u8a = null;
+				if (t.isClosed()) break;
+			}
+			return true;
+		}
 		const str = Y.u2s(u8a),
 			rows = str.split(/\r\n|\r|\n/g),
 			s = this.socket,
-			{ method, url, reqPath } = await TWL.parseFirstRow(rows.shift(), u8a, this.lastCalledRouteFunc);
+			{ method, url, reqPath, params } = await TWL.parseFirstRow(rows.shift(), u8a, this.lastCalledRouteFunc);
 		if (method) {
+			this.params = params || {}; // ハンドラー側で client.params からクエリ参数を参照可能に
 			const hs = await TWL.parseHeader(rows),
 				hl = Object.keys(hs).length;
 			if (hl > 0) {
@@ -536,7 +593,20 @@ class TMiniWebClient {
 			z.tMWS = tMWS;
 			z.lastCalledRouteFunc = async buff => await routFunc(tMWS, buff, routeArgs);
 			D(`found routFunc: ${reqPath}, args: ${routeArgs}`);
-			await routFunc(tMWS, u8a, routeArgs);
+			// #9 修正: ハンドシェイクバッファ（フレームではない）でハンドラーを呼ばない。
+			// ハンドシェイク同梱で後方にフレームバイトが続く場合のみ、後方部分で呼ぶ。
+			const hdrEnd = TWS.findHdrEnd(u8a);
+			if (hdrEnd >= 0 && u8a.length > hdrEnd + 4) {
+				// #新: 同梱バイトも蓄積し、完全なフレームが揃った時点でハンドラーを呼ぶ（分割到着対応）
+				let tail = u8a.subarray(hdrEnd + 4),
+					guard = -1;
+				while (tMWS._bufferFrame(tail) && tMWS._buf && tMWS._buf.length !== guard) {
+					guard = tMWS._buf.length;
+					await routFunc(tMWS, EMPTY_U8A, routeArgs); // receive() が蓄積分を消費する
+					tail = null; // 追加は最初の 1 度だけ
+					if (tMWS.isClosed()) break;
+				}
+			}
 		} catch (ex) {
 			return L(`[ERROR] at _routingWebsocket exec routFunc`, ex) && false;
 		}
@@ -561,7 +631,34 @@ const BT = {
 		nullMask: new Uint8Array([0, 0, 0, 0]),
 	},
 	NULL_NULL_ARRAY = [null, null],
+	EMPTY_U8A = new Uint8Array(0), // 蓄積済みバッファから解析する際の送り玉（u8a 位置引数の互換維持用）
 	TWS = {
+		// HTTP リクエスト末尾（CRLF CRLF）の位置。無ければ -1
+		findHdrEnd: u => {
+			for (let i = 0, l = u.length - 3; i < l; i++)
+				if (u[i] === 13 && u[i + 1] === 10 && u[i + 2] === 13 && u[i + 3] === 10) return i;
+			return -1;
+		},
+		// フレーム全体の総 byte 数。バッファが不完全なら null（次の受信を待つ）を返す。#新
+		_frameSize: u8a => {
+			if (u8a.length < 2) return null;
+			const h1 = u8a[1],
+				l1 = h1 & 0x7f,
+				hasMask = (h1 & 0x80) === 0x80;
+			let hdr = 2,
+				len = l1;
+			if (l1 === 126) {
+				if (u8a.length < 4) return null;
+				len = Y.be2i(u8a.subarray(2, 4));
+				hdr = 4;
+			} else if (l1 === 127) {
+				if (u8a.length < 10) return null;
+				len = Y.be2i(u8a.subarray(2, 10));
+				hdr = 10;
+			}
+			const o2 = hasMask ? hdr + 4 : hdr;
+			return u8a.length >= o2 + len ? o2 + len : null;
+		},
 		_readFrame: (buff = new Uint8Array(1)) => {
 			if (buff.length < 2) {
 				L('at _readFrame:Invalid WebSocket frame header');
@@ -579,10 +676,19 @@ const BT = {
 			p.payloadLength = h1 & 0x7f; //0000.0111.1111.1111 payloadLength
 			const opcode = p.opcode,
 				l1 = p.payloadLength,
-				hasMask = p.hasMask,
-				o1 = (l1 < 0 ? -1 * l1 : 0) + 2;
-			p.length = l1 < 0 ? Y.u2i(u8a.subarray(2, o1)) : l1;
-			const len = p.length;
+				hasMask = p.hasMask;
+			// #6 修正: 126/127 は拡張長のマーカーであり、後続バイトをビッグエンディアンで読む（RFC 6455）。
+			// 旧コードの l1<0 分岐は 0-127 の値では到達せず、126 以上の長さで誤パースしていた。
+			let o1 = 2,
+				len = l1;
+			if (l1 === 126) {
+				len = Y.be2i(u8a.subarray(2, 4));
+				o1 = 4;
+			} else if (l1 === 127) {
+				len = Y.be2i(u8a.subarray(2, 10));
+				o1 = 10;
+			}
+			p.length = len;
 			D('at _readFrame:  compressed:', p);
 			const o2 = hasMask ? o1 + 4 : o1,
 				o3 = o2 + len,
@@ -593,7 +699,7 @@ const BT = {
 			if (hasMask && (mask[0] | mask[1] | mask[2] | mask[3]) !== 0)
 				for (let i = 0; i < l; i++) o[i] = pl[i] ^ mask[i % 4];
 			else for (let i = 0; i < l; i++) o[i] = pl[i];
-			return { opcode, payload: o };
+			return { opcode, payload: o, size: o3 };
 		},
 		_processFrame: (opcode, payload) => {
 			const data = opcode === Opcode.TEXT ? Y.u2s(payload) : opcode === Opcode.PONG ? null : payload,
@@ -607,6 +713,13 @@ export class TMiniWebSocket {
 		this.socket = socket;
 		this._closed = false;
 		this.props = {};
+		this._buf = null; // #新: マルチパケットで分割到着するフレームの蓄積バッファ
+	}
+	// 受信データを蓄積し、完全なフレームが揃っていればその総 byte 数、そうでなければ null を返す
+	_bufferFrame(u8a) {
+		const z = this;
+		if (u8a && u8a.length) z._buf = z._buf ? Y.jud(z._buf, u8a) : u8a;
+		return z._buf ? TWS._frameSize(z._buf) : null;
 	}
 	isClosed() {
 		return this._closed;
@@ -618,6 +731,7 @@ export class TMiniWebSocket {
 		delete this.socket;
 		delete this._closed;
 		delete this.props;
+		delete this._buf;
 	}
 	async close() {
 		try {
@@ -640,11 +754,18 @@ export class TMiniWebSocket {
 	}
 	async receive(u8a) {
 		try {
-			const { opcode, payload } = TWS._readFrame(u8a),
+			const z = this;
+			// #新: 引数があれば蓄積へ追加（旧呼び出し形との互換）。無ければ蓄積済みバッファから1フレーム取り出す
+			if (u8a && u8a.length) z._buf = z._buf ? Y.jud(z._buf, u8a) : u8a;
+			if (!z._buf) return NULL_NULL_ARRAY;
+			const size = TWS._frameSize(z._buf);
+			if (size === null) return NULL_NULL_ARRAY; // 分割到着: 次の受信を待つ
+			const { opcode, payload } = TWS._readFrame(z._buf.subarray(0, size)),
 				{ isSendRes, data, isClosed } = TWS._processFrame(opcode, payload);
-			this._closed = isClosed;
+			z._buf = size < z._buf.length ? z._buf.subarray(size) : null; // 当該フレームを消費
+			z._closed = isClosed;
 			if (isClosed) return NULL_NULL_ARRAY;
-			if (isSendRes) await this.sendCore(isSendRes, data);
+			if (isSendRes) await z.sendCore(isSendRes, data);
 			else if (data)
 				if (opcode === Opcode.BINARY) return [data, MessageType.BINARY];
 				else if (opcode === Opcode.TEXT) return [data, MessageType.TEXT];
@@ -671,20 +792,21 @@ export class TMiniWebSocket {
 		await TWL.write(s, '\r\n');
 	}
 	async sendCore(opcode, payload) {
-		if (this.isClosed()) return;
+		// destroy() 後の遅延 close() でも安全に no-op とする（socket/_closed が delete 済みのケース）
+		if (this.isClosed() || !this.socket) return;
 		try {
 			const fm = [],
 				u = new Uint8Array([0x80 | parseInt(opcode)]),
 				p2 = payload && opcode === Opcode.TEXT ? Y.s2u(payload) : payload,
 				pl = p2 ? p2.length : 0;
 			fm.push(u);
-			if (pl < 126) fm.push(Y.i2u(pl, 1));
+			if (pl < 126) fm.push(Y.i2u(pl, 1)); // 1 バイトはエンディアン差なし
 			else if (pl < 1 << 16) {
 				fm.push(BT.u126);
-				fm.push(Y.i2u(pl, 2));
+				fm.push(Y.i2be(pl, 2)); // #6 修正: 拡張長はビッグエンディアン（RFC 6455）
 			} else {
 				fm.push(BT.u127);
-				fm.push(Y.i2u(pl, 8));
+				fm.push(Y.i2be(pl, 8));
 			}
 			if (p2) fm.push(p2);
 			await TWL.write(this.socket, Y.jus(fm));

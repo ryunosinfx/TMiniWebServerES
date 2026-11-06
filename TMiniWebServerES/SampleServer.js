@@ -15,7 +15,7 @@ TMWS.route('/sample/<id>/<kind>', async (client, args) => {
    id: ${args['id']}<br/>
    kind: ${args['kind']}</p></body>
    </html>`;
-	await client.write_response(html);
+	await client.writeResponse(html);
 });
 TMWS.withWS('/ws/test', async (websocket, u8a) => {
 	try {
@@ -42,11 +42,9 @@ const Chat = {
 		const uL = Chat.getRoomUserList(roomId);
 		await Chat.filterUserList(uL, userId, Chat.isNotSame);
 		D(`leaveRoom roomId:${roomId} /userId:${userId}`);
-		Chat.closingSocketsList.push(socket);
-		setTimeout(Chat.close, 100);
-	},
-	close: () => {
-		for (const socket of Chat.closingSocketsList) socket.close();
+		// closingSocketsList は未定義のまま push され、切断時にプロセス全体を crash させていたため即時 close に変更。
+		// （TMiniWebSocket.close() は内部で例外を握り、既に closed なら no-op のため安全）
+		await socket.close();
 	},
 	enterRoom: async (roomId, userId, socket) => {
 		const uL = Chat.getRoomUserList(roomId),

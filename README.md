@@ -219,7 +219,7 @@ TMiniWebServerES.route('/sample/<id>/<kind>', async (client, args) => {
    id: ${args['id']}<br/>
    kind: ${args['kind']}</p></body>
    </html>`;
-	await client.write_response(html);
+	await client.writeResponse(html);
 });
 ```
 
