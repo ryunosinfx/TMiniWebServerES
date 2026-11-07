@@ -34,8 +34,8 @@ Raspberry Pi Pico2 W でKaluma1.2.1をフラッシュした状態を想定して
 
 ```
 TMiniWebServerES/                      # プロジェクトルート
-├─ index.js                             # エントリポイント（Node/ツール用）
-├─ wifiTest.js                          # Wi‑Fi 接続のテストスクリプト（Karuma/kaluma 向け）
+├─ index.js                             # Kaluma 向け実験/デモスクリプト（npm run flashTest で利用）
+├─ wifiTest.js                          # Wi‑Fi 接続のテストスクリプト（Kaluma 向け）
 ├─ package.json                         # Node 開発用依存定義（ビルド/ツール設定）
 ├─ package-lock.json                    # 依存の固定ロックファイル
 ├─ rollup.config.js                     # フロントエンドバンドル設定（Rollup）
@@ -57,28 +57,30 @@ TMiniWebServerES/                      # プロジェクトルート
 │     └─ tminiwebserver_util.py            # サーバーのユーティリティ関数（Python）
 ├─ wwwroot/                             # 静的ウェブコンテンツ
 │  ├─ index.html                        # デフォルトの Web UI
-│  ├─ Vw.js                             # フロントエンドユーティリティ
+│  ├─ Vw.js                             # フロントエンド View ユーティリティ
+│  ├─ Y.js                              # フロントエンド共通ユーティリティ
+│  ├─ const.js                          # フロントエンド定数（WS_URL 等）
+│  ├─ file_util.js                      # ファイル選択等のユーティリティ
+│  ├─ OPFS.js                           # OPFS(Origin Private File System) ヘルパ
 │  ├─ ws_test.html                      # WebSocket テストページ
-│  ├─ ws_chat.html                      # WebSocket チャットデモ
 │  ├─ ws_test.js                        # WebSocket テスト用クライアントスクリプト
-│  └─ ws_chat.js                        # チャット用クライアントスクリプト
-└─ TMiniWebServerES/                       # JavaScript/ES 実装フォルダ
-	├─ main.js                              # JS 実行用エントリ（Karuma/Kaluma 用など）
-    ├─ SampleServer.js                      # サンプルサーバー（Node/ES 向け）
-    ├─ TMiniWebServerES.js                  # ライブラリ本体（ES モジュール）
-	├─ TMiniWebServerUtil.js                # ユーティリティ（ES）
-	├─ Utils.js                             # 補助ユーティリティ
-	├─ sha1.min.js                          # 署名/ハッシュ用ミニライブラリ
-	└─ TMiniWebServerUtil.js                # （重複名確認）ユーティリティ（注意：名前重複あり）
+│  ├─ ws_chat.html                      # WebSocket チャットデモ
+│  ├─ ws_chat.js                        # チャット用クライアントスクリプト
+│  ├─ ws_chat2.html                     # チャットデモ（画像添付あり）
+│  └─ ws_chat2.js                       # 画像添付付きチャットクライアント
+└─ TMiniWebServerES/                    # JavaScript/ES 実装フォルダ
+   ├─ main.js                           # Kaluma 用エントリ（WiFi 接続後にサンプルサーバーを起動）
+   ├─ SampleServer.js                   # サンプルサーバー（Node/Kaluma 共通）
+   ├─ TMiniWebServerES.js               # ライブラリ本体（ES モジュール）
+   ├─ TMiniWebServerUtil.js             # サーバー系ユーティリティ（ES）
+   ├─ Utils.js                          # 補助ユーティリティ（ログ/待機等）
+   └─ sha1.min.js                       # WebSocket ハンドシェイク用 SHA-1
 ```
 
 注意・補足:
 
 - `wifiTest.js` の最後は `connectWifiStatic;` となっており、関数呼び出しになっていません。実行するには `connectWifiStatic();` に修正してください。
-- Karuma/kaluma などの組込み JS 環境では Node の `fs` API と同一ではないことが多く、ファイルアクセスは `storage` や各環境固有 API を使う必要があります。
-- `TMiniWebServerES/` 内に `TMiniWebServerUtil.js` が二重に見えるため、実際の用途に応じて整理（重複削除または名前変更）を検討してください。
-
-もしこのツリーに追加の注釈（個別ファイルの詳細な説明や実行方法）を付けたい場合、対象ファイル名と説明したいポイントを教えてください。
+- Kaluma などの組込み JS 環境では Node の `fs` API と同一ではないことが多く、ファイルアクセスは `storage` や各環境固有 API を使う必要があります。
 
 ## 環境セットアップ
 
@@ -178,10 +180,14 @@ httpsには対応していません。
 詳細は`./TMiniWebServerES/SampleServer.js`を参照してください。
 
 ```js
-import { TMiniWebServerES } from './TMiniWebServerES/tminiwebserver.js';
+// TMiniWebServerES.js と同じフォルダに配置するプログラムからの import
+import { TMiniWebServerES, MessageType, TMWS } from './TMiniWebServerES.js';
+import { HttpStatusCode } from './TMiniWebServerUtil.js';
 
-// Server Start
-TMiniWebServerES().start();
+// ルーティング登録（後述の TMWS.route / TMWS.withWS）を行ってから起動する。
+// 引数省略時は port=8080 / bindIP='0.0.0.0' / wwwroot='/wwwroot'（Kaluma 向けの既定）。
+// Node で試す場合は wwwroot を相対パス（例 '../wwwroot'）で指定する。
+new TMiniWebServerES(8080, '0.0.0.0', './wwwroot').start();
 ```
 
 ## スタティックファイルのサービング
@@ -197,7 +203,7 @@ TMiniWebServerES のコンストラクターで`wwwroot`の指定が可能です
 これは`http://(your-address)/simple`にアクセスにきたときに呼び出されます。
 
 ```js
-TMiniWebServerES.route('/simple', 'GET', async client => {
+TMWS.route('/simple', 'GET', async client => {
 	const data = 'Hello,world';
 
 	// ステータスコードは明示的に設定が可能で、省略時にはOK(200)が設定されている.
@@ -209,10 +215,10 @@ TMiniWebServerES.route('/simple', 'GET', async client => {
 ## ルーティングハンドラーとパラメーター受け取り
 
 リクエストを処理するハンドラー関数を以下のように実装します。
-このとき、デコレーターによるパス指定で所定の記述をすると、パスの一部をパラメーターとして取得できます。
+このとき、`TMWS.route` のパス文字列内に `<id>` のように記述すると、パスの一部をパラメーターとして取得できます。
 
 ```js
-TMiniWebServerES.route('/sample/<id>/<kind>', async (client, args) => {
+TMWS.route('/sample/<id>/<kind>', async (client, args) => {
 	// URL のパスに指定されたパラメータをキーワードで取得.
 	const html = `<html lang='ja'>
    <body><p>パラメータ情報: <br/>
@@ -225,17 +231,19 @@ TMiniWebServerES.route('/sample/<id>/<kind>', async (client, args) => {
 
 ## WebSocket の使用
 
-WebSocket を受け付けるルーティングの設定はデコレーターで行います。
-このハンドラー関数は、WebSocket のハンドシェイクが完了後に呼び出されます。
-この関数から抜けると、WebSocket 通信はクローズとなります。
+WebSocket を受け付けるルーティングの設定は `TMWS.withWS()` で行います。
+このハンドラー関数は、クライアントからメッセージ（または制御フレーム）を受信するたびに呼び出されます。
+受信データが TCP パケットに分割されて届いた場合や、細分化（continuation フレーム）されたメッセージも、内部で蓄積・再接続され 1 メッセージとして受け取れます。
+1 メッセージの上限は `TMiniWebServerES.js` の `MAX_MSG_SIZE` 定数（既定 16KB）で、超過した接続は close(1009) でクローズされます。
+通信を閉じるには `websocket.close()` を呼ぶか、クライアント側から切断します。
 
 ```js
-TMiniWebServerES.withWS('/ws/', async (websocket, u8a) => {
+TMWS.withWS('/ws/', async (websocket, u8a) => {
 	try {
 		const [data, mimeType] = await websocket.receive(u8a);
 		console.log(`received: ${data}/${mimeType}`);
 		if (data === 'cmd_close') await websocket.close();
-		else await websocket.send('Hello,world!!', TMiniWebSocket.MessageType.TEXT);
+		else await websocket.send('Hello,world!! ' + data, MessageType.TEXT);
 	} catch (e) {
 		console.error(e);
 	}
@@ -245,7 +253,7 @@ TMiniWebServerES.withWS('/ws/', async (websocket, u8a) => {
 この WebSocket 用のハンドラーにおいてもパスのパラメーターを受け取ることが可能です。
 
 ```js
-TMiniWebServerES.withWS('/ws/<id>', async (websocket, u8a, args) => {
+TMWS.withWS('/ws/<id>', async (websocket, u8a, args) => {
 	console.log(args);
 	// ...
 });
@@ -261,13 +269,13 @@ TMiniWebServerES.withWS('/ws/<id>', async (websocket, u8a, args) => {
 			B[SampleServer.js]
 			C[TMiniWebServerES.js]
 			D[TMiniWebServerUtil.js]
-			E[util.js]
+			E[Utils.js]
 			F[sha1.min.js]
 			Y[bundle.js]
 			Ba[SampleServer.js]
 			Ca[TMiniWebServerES.js]
 			Da[TMiniWebServerUtil.js]
-			Ea[util.js]
+			Ea[Utils.js]
 			Fa[sha1.min.js]
 	subgraph Kaluma
 		subgraph X[Rollupによるバンドル]
@@ -333,7 +341,3 @@ Resetting Flash memory
 申し訳ないですが各自での修正作業を行っていただくか、Pull Request を頂ければ嬉しく思います。
 
 WebSocketに必要なSHA-1の実装はCrypto.jsから持ってきています。
-
-```
-
-```
