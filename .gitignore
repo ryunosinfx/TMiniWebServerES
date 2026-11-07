@@ -6,3 +6,11 @@ node_modules
 ./node_modules/*
 bundle*.*js
 .env
+.npm-cache/
+.playwright-browsers/
+browserTest/out/
+.ff-home/
+.ff-tmp/
+.ff-run/
+.ff-profile/
+browserTest/tests/err*.log

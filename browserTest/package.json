@@ -1,0 +1,20 @@
+{
+  "name": "tminiwebserver-browser-test",
+  "private": true,
+  "type": "module",
+  "description": "WebブラウザJS動作確認用ハーネス（Playwright）",
+  "scripts": {
+    "install-browser": "PLAYWRIGHT_BROWSERS_PATH=../.playwright-browsers npx playwright install chromium firefox",
+    "smoke": "PLAYWRIGHT_BROWSERS_PATH=../.playwright-browsers node tests/smoke.mjs",
+    "smoke:ff": "PLAYWRIGHT_BROWSERS_PATH=../.playwright-browsers BROWSER=firefox node tests/smoke.mjs",
+    "multi": "PLAYWRIGHT_BROWSERS_PATH=../.playwright-browsers node tests/multi-profile-chat.mjs",
+    "multi:ff": "PLAYWRIGHT_BROWSERS_PATH=../.playwright-browsers BROWSER=firefox node tests/multi-profile-chat.mjs",
+    "fileshare": "PLAYWRIGHT_BROWSERS_PATH=../.playwright-browsers node tests/ws-chat2-fileshare.mjs",
+    "fileshare:ff": "PLAYWRIGHT_BROWSERS_PATH=../.playwright-browsers BROWSER=firefox node tests/ws-chat2-fileshare.mjs",
+    "label": "PLAYWRIGHT_BROWSERS_PATH=../.playwright-browsers node tests/ws-chat2-label-test.mjs",
+    "label:ff": "PLAYWRIGHT_BROWSERS_PATH=../.playwright-browsers BROWSER=firefox node tests/ws-chat2-label-test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.0"
+  }
+}
