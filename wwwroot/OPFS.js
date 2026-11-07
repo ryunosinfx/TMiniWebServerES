@@ -7,12 +7,21 @@ export class OPFS {
 	static co = { create: T };
 	static rc = { recursive: T };
 	static at0 = { at: 0 };
-	static i = async n => {
-		OPFS.p = await navigator.storage.persist(); //永続化呪文
-		OPFS.t = await navigator.storage.getDirectory(); //init root
-		if (n) OPFS.d = OPFS.mkDir(n);
-		OPFS.d = Y.B2U(await H.d(OPFS.d + n, 10)); //常にハッシュBase64URL@SHA256で指定
-	};
+	static rd = Promise.resolve(); //初期化完了Promise: ハンドラへ触れる操作は必ず await する(未初期化競合の解消)
+	static i = n =>
+		((OPFS.rd = (async () => {
+			// Firefox(ヘッドレス)では persist() が解決しないことがあるためタイムアウト付き race で保護。
+			// 永続化できなくても OPFS 自体は使用可能（persistence は最適化のお願いに過ぎない）。
+			try {
+				OPFS.p = await Promise.race([navigator.storage.persist(), new Promise(r => setTimeout(r, 3000, false))]);
+			} catch (e) {
+				OPFS.p = false;
+			}
+			OPFS.t = await navigator.storage.getDirectory(); //init root
+			if (n) OPFS.d = OPFS.mkDir(n);
+			OPFS.d = Y.B2U(await H.d(OPFS.d + n, 10)); //常にハッシュBase64URL@SHA256で指定
+		})()),
+		OPFS.rd);
 	static gDH = async (p, d, o) => {
 		io(`OPFS gDH 1 p:${p}`, d, o);
 		try {
@@ -119,14 +128,15 @@ export class OPFS {
 		}
 		return a;
 	};
-	static g = (n, h) => `${OPFS.d + P + n}.${h}`;
+	static g = async (n, h) => ((await OPFS.rd), `${OPFS.d + P + n}.${h}`); //パス生成も初期化(deterministic hash dir)待ち
 	static x = async (p, ab, i) => {
-		const n = (await OPFS.w(OPFS.g(p, Y.B2U(await H.d(ab, 10))), ab)).split(OPFS.d + P)[1];
+		const n = (await OPFS.w(await OPFS.g(p, Y.B2U(await H.d(ab, 10))), ab)).split(OPFS.d + P)[1];
 		return i ? n.split('.').pop() : n; //iがTrueの場合、hashのみを返す。
 	}; //データを重複せずに書き込む系、ハッシュ値込みのファイル名を返す,iがTrueの場合はハッシュ値のみ
-	static y = async (n, h) => await OPFS.r(OPFS.g(n, h)); //ファイル名&ハッシュでロード
-	static rmh = async (n, h) => await OPFS.rmf(OPFS.g(n, h)); //ファイル名&ハッシュで削除
+	static y = async (n, h) => await OPFS.r(await OPFS.g(n, h)); //ファイル名&ハッシュでロード
+	static rmh = async (n, h) => await OPFS.rmf(await OPFS.g(n, h)); //ファイル名&ハッシュで削除
 	static w = async (p, ab) => {
+		await OPFS.rd; //初期化(ルート/管理Dir)完了待ち
 		io('OPFS.w p:', p);
 		const d = await OPFS.mkFile(p); //Write ArrayBuffer
 		if (d.createSyncAccessHandle) {
@@ -142,6 +152,7 @@ export class OPFS {
 		return p;
 	};
 	static r = async p => {
+		await OPFS.rd; //初期化完了待ち
 		const d = await OPFS.mkFile(p), // read as ArrayBuffer
 			b = await d.getFile();
 		return await b.arrayBuffer();

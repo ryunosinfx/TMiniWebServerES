@@ -3,7 +3,9 @@ import { WS_URL, m1, m1Textarea, m1w100, m1w120, m1Flex, m10, t4, names, cmds } 
 import { FileUtil } from './file_util.js';
 import { Y, H, gBl, pr, io, now } from './Y.js';
 import { OPFS } from './OPFS.js';
-const US = 1024 * 10;
+// サーバの MAX_MSG_SIZE(16KB) に収める: base64url 展開(4/3)+ヘッダ+JSON envelope で
+// 16384 を超えないようチャンク元サイズは 8KiB とする (8192*4/3+~150 ≒ 11.1KB)
+const US = 8 * 1024;
 const wt = 100;
 const dir = '_app_';
 const DIV = 'div';
@@ -61,33 +63,44 @@ class App {
 		const da = await Y.c(ab);
 		const c = App.split(da, h, a);
 		const m = App.mkM(uid, h, n, t, l, c, s);
+		// サーバ実装そのままでは中継は chat(cmd C) の msg 文字列のみ。
+		// ヘッダ/チャンクを chat メッセージとして送信する（ヘッダは [...]、チャンクは h.i.c.r）。
 		await App.w(wt);
-		this.wc.send(m);
-		console.log('send C:' + C + ' m:', m);
-		for (let i = 0; i < C; i++) this.wc.send(m);
+		this.wc.chat(m);
+		for (let i = 0; i < a.length; i++) {
+			this.wc.chat(a[i]);
+			await App.w(wt);
+		}
+		console.log(`send file: header + ${c} chunks (h:${h})`);
 	}
 	async onR(d) {
 		try {
-			if (d.indexOf('[') === 0) {
+			if (App.isHeader(d)) {
 				const [uid, h, n, t, l, c, s] = JSON.parse(d);
 				const rd = this.rd[uid] ? this.rd[uid] : {};
 				this.rd[uid] = rd;
 				rd[h] = { uid, h, n, t, l, c, s, v: new Array(c) };
 				this.rr[h] = rd[h];
-			} else if (d.indexOf('.') > 1) {
+				io(`file share start: ${n} (${l}B, ${c} chunks)`);
+				return true;
+			} else if (App.isChunk(d)) {
 				const ts = d.split('.');
-				if (ts.length !== 4) return;
 				const [h, i, c, r] = ts;
-				io(`${h}.${i}/${c}.${r.length}`);
 				const rr = this.rr[h];
+				if (!rr) return true; // 既知転送でなければ握りつぶす（チャットログに出さない）
+				io(`${h}.${i}/${c}.${r.length}`);
 				const ab = App.gather(r, i, rr) ? await Y.d(Y.jus(rr.v).buffer) : null;
 				if (ab) this.onCmpl(await App.save(rr.n, rr.t, ab)); //save to OPFS
+				return true;
 			}
 		} catch (e) {
 			io(e);
 		}
 		return false;
 	}
+	// ファイル共有メッセージ判定（通常のテキスト投稿と混同しないための形式照合）
+	static isHeader = d => d.startsWith('[') && (() => { try { const o = JSON.parse(d); return Array.isArray(o) && o.length === 7 && typeof o[1] === 'string'; } catch { return false; } })();
+	static isChunk = d => /^[\w-]{20,}\.\d+\.\d+\./.test(d);
 	//load to OPFS
 	async onCmpl(obj) {
 		this.l.push(obj);
@@ -102,7 +115,7 @@ class App {
 		const n3 = Vw.add(nr, SPAN);
 		Vw.sT(n3, gBl(ab));
 		const i1 = Vw.add(ir, IMG, { width: 100, height: 100 });
-		i1.src = Y.a2D(ab);
+		i1.src = `data:${obj.t};base64,${Y.a2B(ab)}`; // Y.a2D は未定義のため a2B(base64) で組み立てる
 	}
 	static gather(r, i, rr) {
 		if (!rr) return;
@@ -114,16 +127,16 @@ class App {
 	}
 	static save = async (n, t, ab) => {
 		const h = await H.d(ab);
-		const p = OPFS.g(n, h);
+		const p = await OPFS.g(n, h);
 		await OPFS.w(p, ab);
 		return { t, n, h };
 	};
-	static load = async (n, t, h) => await OPFS.r(OPFS.g(n, h));
-	static del = async (n, t, h) => await OPFS.rmf(OPFS.g(n, h));
+	static load = async (n, t, h) => await OPFS.r(await OPFS.g(n, h));
+	static del = async (n, t, h) => await OPFS.rmf(await OPFS.g(n, h));
 	static split = (ab, h, a = []) => {
 		const s = gBl(ab);
 		const c = Math.ceil(s / US);
-		for (let i = 0; i < c; i++) a.push(App.mkT(h, i, C, Y.u2U(Y.as(ab, i * US, (i + 1) * US))));
+		for (let i = 0; i < c; i++) a.push(App.mkT(h, i, c, Y.u2U(Y.as(ab, i * US, (i + 1) * US))));
 		return c;
 	};
 	static mkM = (uid, h, n, t, l, c, s) => JSON.stringify([uid, h, n, t, l, c, s]);
@@ -250,6 +263,22 @@ export class ESWsMainView {
 				Vw.sS(colG2, C.dBlock);
 			};
 		const onChatFunc = data => {
+			// サーバの中継は {userId,msg,t} エンベロープ。msg がファイル共有フレームなら
+			// App.onR で消費し、通常のチャットテキストとしてログには出さない。
+			const raw = data && data.data !== undefined ? data.data : data;
+			if (typeof raw === 'string') {
+				let msg = null;
+				try {
+					const o = JSON.parse(raw);
+					if (o && typeof o.msg === 'string') msg = o.msg;
+				} catch (e) {
+					console.debug(e);
+				}
+				if (msg !== null && (App.isHeader(msg) || App.isChunk(msg))) {
+					this.app.onR(msg);
+					return;
+				}
+			}
 			ESWsMainView.add(colWSlog, data);
 		};
 		const onClose = () => {
