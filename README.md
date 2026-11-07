@@ -38,6 +38,7 @@ TMiniWebServerES/                      # プロジェクトルート
 ├─ wifiTest.js                          # Wi‑Fi 接続のテストスクリプト（Kaluma 向け）
 ├─ package.json                         # Node 開発用依存定義（ビルド/ツール設定）
 ├─ package-lock.json                    # 依存の固定ロックファイル
+├─ browserTest/                         # Playwright 自動ブラウザテスト（→ browserTest/README.md）
 ├─ rollup.config.js                     # フロントエンドバンドル設定（Rollup）
 ├─ eslint.config.js                     # ESLint 設定ファイル
 ├─ .prettierrc.yaml                      # Prettier 設定
@@ -316,6 +317,14 @@ npm run server
 以下でアクセスできます。
 
 http://localhost:8080/index.html
+
+## Webブラウザでの動作確認（自動ブラウザテスト）
+
+クライアント側JS（ws_test / ws_chat / ws_chat2 のファイル共有など）の実ブラウザ動作を、
+Playwright によるヘッドレスブラウザ自動テストで検証できます。
+Chromium 158 / Firefox 159 で全テスト動作確認済みです。
+
+- **セットアップ手順・テスト実行方法・必要環境(バージョン/ストレージ)**: [browserTest/README.md](./browserTest/README.md)
 
 ## Pico が応答不能になった場合
 
