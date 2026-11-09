@@ -264,15 +264,26 @@ const U = {
 					fs.open(path, 'r', async (err, fd) => {
 						if (err) return L('ファイルが開けない');
 						// with open(file_phys_path, 'rb') as f:
-						fs.read(fd, async (err, br, buf) => {
-							L(`read ${err},${br}, ${buf}`);
-							const ro = 0;
-							if (err) console.error(err);
-							if (br >= ro + READ_UNIT) await writeCallBack(buf);
-							else if (br > ro) await writeCallBack(buf.subarray(0, br - ro));
+						// rfKaluma と同じ READ_UNIT チャンクの繰り返し読み（16KB 超ファイルを切り捨てない）
+						try {
+							const c = Math.ceil(length / READ_UNIT);
+							for (let i = 0; i < c; i++) {
+								const s = READ_UNIT * i,
+									e = Math.min(s + READ_UNIT, length),
+									d = e - s,
+									buf = new Uint8Array(d),
+									res = await new Promise(rr => fs.read(fd, buf, 0, d, s, (er2, br2, b2) => rr({ er2, br2, b2 })));
+								if (res.er2) console.error(res.er2);
+								if (res.br2 >= d) await writeCallBack(buf);
+								else if (res.br2 > 0) await writeCallBack(buf.subarray(0, res.br2));
+								if (res.br2 < d) break; // EOF 早退
+							}
+						} catch (e) {
+							L(e);
+						} finally {
 							fs.close(fd);
 							r();
-						});
+						}
 					});
 				}),
 	getMineTypeFromExt: fp => {

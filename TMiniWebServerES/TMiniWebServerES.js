@@ -109,12 +109,14 @@ export class TMiniWebServerES {
 			a = {},
 			svr = net.createServer(s => {
 				try {
-					console.log(s);
 					D(`client connected at ${s.localAddress}`); // 'connection' listener.
 					const c = new TMiniWebClient(s, z),
 						k = `${Date.now()}/${Math.random()}`;
 					a[k] = c;
 					TMWS.deleteExpireConns(a); // 接続直後も上限を即座に効かせる（バースト時の無制限化防止）
+					// socket の error(EPIPE/ECONNRESET 等: クライアント切断競合)は無ハンドラだとプロセス全体を
+					// crash させる(Emitted 'error' event on Socket)。close が後追いで発火するので握りつぶして寿命に任せる
+					s.on('error', err => L('[WARN] socket error:', err && err.code ? err.code : err));
 					s.on('data', u8a => c._processRequest(u8a));
 					// #4 修正: L() が常に undefined を返すため && 後が一度も実行されていなかった（close と同様に分離）
 					s.on('end', evt => {
@@ -359,11 +361,13 @@ const TWL = {
 		await TWL.writeResponse(s, content, undefined, code);
 	},
 	write: (s, data) =>
-		new Promise((resolve, reject) =>
+		new Promise(resolve =>
 			!s.destroyed
 				? s.write(
 						data,
-						evt => (evt ? reject(evt) : resolve()) || D(`send!${typeof evt}/${s.bytesWritten}`, evt)
+						// 切断競合(EPIPE 等)で reject せず resolve: 相手を失った送信の失敗は上位の業務を落とさない
+						// (socket の close/end イベントが後追いで発火し接続寿命管理は完了する)。Unhandled rejection 防止
+						evt => (evt ? L('[WARN] TWL.write error:', evt && evt.code ? evt.code : evt) : D(`send!${typeof evt}/${s.bytesWritten}`, evt)) || resolve(s.destroyed)
 					)
 				: resolve(s.destroyed)
 		),
