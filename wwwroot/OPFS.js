@@ -18,8 +18,9 @@ export class OPFS {
 				OPFS.p = false;
 			}
 			OPFS.t = await navigator.storage.getDirectory(); //init root
-			if (n) OPFS.d = OPFS.mkDir(n);
-			OPFS.d = Y.B2U(await H.d(OPFS.d + n, 10)); //常にハッシュBase64URL@SHA256で指定
+			// 管理域名をハッシュしたディレクトリ（FS ルート直下の <OPFS.d>/ が作業ドメイン）。
+			// 旧実装の OPFS.d = OPFS.mkDir(n) は Promise を d に代入した上 FS ルートに素の n ディレクトリを作る副作用があったため除去。
+			OPFS.d = Y.B2U(await H.d('OPFS_' + n, 10)); //常にハッシュBase64URL@SHA256で指定
 		})()),
 		OPFS.rd);
 	static gDH = async (p, d, o) => {
@@ -38,13 +39,23 @@ export class OPFS {
 		return await OPFS.gDH(p, d, a ? undefined : OPFS.co);
 	}; //async/await
 	static gDHR = async (p, iN = T) => {
-		const s = isArr(p) ? p : p.split(P);
-		let t = OPFS.t;
-		io(`OPFS gDHR p:${p}/t:${t}/iN:${iN}`, t);
-		for (const d of s) {
+		const s = isArr(p) ? p : String(p).split(P);
+		// 基準点解決: 呼び出し系によって (a) 素の相対パス(meta/... 等)、(b) OPFS.d を既に接頭辞に含む絶対-ish(<hash>/... 等、ls/OPFS.g 由来)
+		// の 2 種類が渡る。先頭がドメイン名なら FS ルートから、そうでなければドメインルート(<FSルート>/<OPFS.d>)から辿る。
+		// これにより w/r/ls 全域で同一の実体 <FSルート>/<OPFS.d>/<相対パス> を指す（ドメイン分離の本来意図）。
+		let t, segs;
+		if (s[0] === OPFS.d) {
+			t = OPFS.t;
+			segs = s;
+		} else {
+			t = await OPFS.mkD(OPFS.d, OPFS.t); //ドメインルート自体は常に create で確保
+			segs = s.filter(x => x && x !== '.');
+		}
+		for (const d of segs) {
 			io(`OPFS gDHR 1 d:${d}/t:${t}/iN${iN}`, t);
 			t = iN ? await OPFS.mkD(d, t) : await OPFS.gDH(d, t);
 			io(`OPFS gDHR 2 d:${d}/t:${t}/iN${iN}`, t);
+			if (!t) return t; //途中消失時は undefined（gDH が握りつぶし）で後段の例外を避ける
 		}
 		return t;
 	};
@@ -121,8 +132,8 @@ export class OPFS {
 			else {
 				const f = await v.getFile(),
 					p = j.split('.'),
-					h = i ? p.pop() : E,
-					k = c + P + i ? p.join('.') : j;
+					h = i ? p.pop() : E, //拡張子分離は i=true のときのみ
+					k = i ? p.join('.') : j; //旧実装 (c+P+i)?.. は常に真で無条件に最終 dot 尾を落としていた（meta/x.json → k=x）
 				a.push({ k, t: f.type, lm: f.lastModified, h, p: c, s: f.size }); //kはファイル名、vはハンドラ
 			}
 		}

@@ -268,7 +268,7 @@ wwwroot/
 
 サーバーに認証機構がないため（§3）、**アプリ層のハッシュ採決方式**で実装する。平文パスワードの保持は参加者側で接続セッション中のメモリ上のみ（§6.6）、恒久保存と検証への使用は seedSaltedHash のみ（§6.2）。
 
-- ローカル保存: `rooms/<rid>/room.json` = `{rid, pw: seedSaltedHash, pwSalt: "YYYYMM"|"YYYYMMDD", srvOn, cr: creatorUid, cg: 設定世代, xorig: 許可オリジン有効, oa: [b64url(origin)…]}`（OPFS。`pw` は `pwSalt` 期間内のみ有効、§6.7。競合時 `conflict: true` 追記、§6.9）
+- ローカル保存: `rooms/<rid>/room.json` = `{rid, nm: 部屋名b64url, pw: seedSaltedHash, pwSalt: "YYYYMM"|"YYYYMMDD", srvOn, cr: creatorUid, cg: 設定世代, xorig: 許可オリジン有効, oa: [b64url(origin)…]}`（OPFS。`pw` は `pwSalt` 期間内のみ有効、§6.7。競合時 `conflict: true` 追記、§6.9。`nm` はホームの部屋一覧表示に使用）
 - **認証完了前の端末に対しては、アプリは全データフレーム（§8）の送出も受理（データ系）も行わない**。認証待ちの受信フレームは破棄
 
 ### 6.2 認証シークエンス（全メンバー確認 + オリジンハッシュ）
@@ -657,7 +657,7 @@ msg  ≒ 11.0 KB
 
 - API: `StoreTX.tx(name, fn)` — `name` はファイル識別名（`user_settings`/`app_state`）。`fn` は read-modify-write 関数で、ロック内でのみ実行される
 - **単一処理者**: `navigator.locks.request(name)`（Web Locks API）の排他ロックを保持したタブが処理者を兼ねる。他タブからの `tx` 要求は BroadcastChannel（`imgroom.tx.<name>`）で処理者へ委譲され、結果と変更スナップショットを受け取る（他タブのキャッシュは通知で無効化）
-- **代替手段**: Web Locks 非対応ブラウザ（古い Firefox 想定）では、OPFS 上のロックファイル（`<hashed root>/locks/<name>.lock`）へ `createSyncAccessHandle` による**ハートビート（2s 間隔更新・6s 失効）ロック**で処理者を選出。失効待ちで自動引き継ぎされる
+- **代替手段**: Web Locks 非対応ブラウザ（古い Firefox 想定）では、**BroadcastChannel ハートビートによる処理者選出**（2s 間隔で `leader:<name>` を宣言、6s 応答が途絶えたタブが最小タブ ID 順で引き取り、OPFS へロックトークンファイル `<hashed root>/locks/<name>.lock` を記述して状態可視化）。BC は全対応済みのため追加モジュール不要
 - ロック保持タブが閉じられた場合: ハートビート停止 → 他タブが規定時間後にロックを取得し次処理者となる（待機中の委譲要求は再送）
 - 同一タブ内の `tx` は FIFO キューで直列化（ロック再取得は不要）
 - 同一機構は部屋セッション単位にも適用される（`room.<rid>` ロックによる単一所有者タブ、§9.12）
