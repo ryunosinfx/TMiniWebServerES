@@ -121,7 +121,7 @@ export class RoomApp {
 			return '';
 		}
 	}
-	dl(blob, name) { // <a download> 発火（§9.10 ビューア保存/DL 共通）
+	dl(blob, name, toast) { // <a download> 発火（§9.10 ビューア保存/DL 共通）。v2.2 §26: toast=true で成功時 10 秒表示
 		try {
 			const a = Vw.ce('a');
 			a.href = URL.createObjectURL(blob);
@@ -130,6 +130,7 @@ export class RoomApp {
 			a.click();
 			Vw.rm(a);
 			setTimeout(() => URL.revokeObjectURL(a.href), 6000);
+			if (toast) Toast(t('msg.dl.ok'), 10000);
 		} catch (e) {
 			ef(e, 'room_app.dl');
 		}
@@ -148,9 +149,19 @@ export class RoomApp {
 		e.title = Vw.add(this.hd, 'b');
 		e.usage = Vw.add(this.hd, 'span', { class: 'ir-mut' }); // §9.11 使用量
 		e.modeWrap = Vw.div(this.hd, { class: 'ir-row' }); // §5.2 モード切替（server では非表示）
-		e.lblN = Vw.add(e.modeWrap, 'span', { class: 'ir-mut' });
-		e.tgl = Toggle({ parent: e.modeWrap, label: '', onChange: on => this.setMode(on) });
-		e.lblS = Vw.add(e.modeWrap, 'span', { class: 'ir-mut' });
+		// v2.2 §26: 通常⇄同期はヘッダーでもラジオスイッチ（意味が分かるラベル。参加フォームと同じ 同期/通常）
+		e.modeR = Vw.div(e.modeWrap, { class: 'ir-rsw' });
+		e.rMode = {};
+		e.rModeLbl = {};
+		for (const [on, key] of [[true, 'hdr.mode.sync'], [false, 'hdr.mode.normal']]) {
+			const lb = Vw.add(e.modeR, 'label', { class: 'ir-rw' });
+			const ip = Vw.ipt(lb, { type: 'radio', name: 'ir-hdrmode' });
+			e.rModeLbl[on] = Vw.add(lb, 'span');
+			Vw.ael(ip, 'change', () => {
+				if (ip.checked) this.setMode(on);
+			});
+			e.rMode[on] = ip;
+		}
 		e.lang = Vw.add(this.hd, 'select', { class: 'ir-langs' }); // 言語 auto/ja/en
 		for (const v of ['auto', 'ja', 'en']) {
 			const o = Vw.ce('option');
@@ -172,8 +183,8 @@ export class RoomApp {
 	lblHdr() { // 言語再描画対応
 		const e = this.hdEls;
 		Vw.sT(e.title, t('app.title'));
-		Vw.sT(e.lblN, t('hdr.mode.normal'));
-		Vw.sT(e.lblS, t('hdr.mode.sync'));
+		Vw.sT(e.rModeLbl[true], t('hdr.mode.sync')); // v2.2 §26: ラジオスイッチのラベル（言語切替対応）
+		Vw.sT(e.rModeLbl[false], t('hdr.mode.normal'));
 		const opts = e.lang.options;
 		opts[0].textContent = t('hdr.lang') + ': auto';
 		opts[1].textContent = t('hdr.lang') + ': 日本語';
@@ -238,7 +249,11 @@ export class RoomApp {
 			ctx = this.rooms.get(this.active);
 		const disp = v => (v ? '' : 'none');
 		Vw.sS(e.modeWrap, { display: ctx && ctx.mode !== 'server' ? '' : 'none' });
-		if (ctx && e.tgl) e.tgl.set(ctx.sync && ctx.sync.enabled);
+		if (ctx && e.rMode) {
+			const en = !!(ctx.sync && ctx.sync.enabled);
+			e.rMode[true].checked = en;
+			e.rMode[false].checked = !en;
+		}
 		for (const k of ['trash', 'bulk', 'logout']) Vw.sS(e[k], { display: ctx ? disp(true) : disp(false) });
 		Vw.sS(e.menu, { display: ctx && ctx.room.cr === ctx.uid ? '' : 'none' }); // 作成者のみ §5.3
 	}
@@ -448,15 +463,17 @@ export class RoomApp {
 		const mxIn = Vw.ipt(mxRow, { type: 'number', name: 'ir-cmx', min: '1', max: '200', step: '1' });
 		mxIn.value = String(Math.max(1, Math.round((this.cfg.MAX_IMG_BYTES || 10485760) / 1048576)));
 		const row = Vw.div(f, { class: 'ir-row' });
-		const gen = Vw.btn(row, { class: 'ir-btn' }); // 自動生成（512bit b64url）
+		const gen = Vw.btn(row, { class: 'ir-btn' }); // 生成（512bit b64url）。v2.2 §26: 既定で自動生成済み・ボタンは再作成
 		Vw.sT(gen, t('btn.pw.auto'));
-		Vw.click(gen, async () => {
+		const doGen = async () => {
 			try {
 				pwIn.value = await AuthChallenge.newPw(this.cfg.PW_BITS);
 			} catch (e) {
 				ef(e, 'room_app.newPw');
 			}
-		});
+		};
+		Vw.click(gen, doGen);
+		doGen(); // 起動時点で自動生成パスワードをデフォルト設定
 		const xo = Toggle({ parent: row, label: 'btn.xorig', onChange: () => {} }); // xorig=true で以後メニューから oa 管理（§6.6）
 		const go = Vw.btn(row, { class: 'ir-btn' });
 		Vw.sT(go, t('btn.create'));
@@ -795,6 +812,7 @@ export class RoomApp {
 			Object.assign(ctx.room, r);
 			ctx.collection.cfg.MAX_IMG_BYTES = +ctx.room.mx > 0 ? +ctx.room.mx : this.cfg.MAX_IMG_BYTES;
 			this.renderTabs();
+			if (ctx._zone) ctx._zone.classList.toggle('ir-srvon', r && (r.srvOn === true || r.srvOn === 'true')); // v2.2 §26: 同期ゾーンの枠線/色をライブ反映
 		});
 		ctx.session.on('participants', list => {
 			ctx.collection.setOnline((list || []).map(x => x.uid));
@@ -880,8 +898,12 @@ export class RoomApp {
 			}
 		}
 		if (ctx.mode === 'server') this.urlQrBlock(ctx); // サーバーモードは URL QR 常時表示（追加仕様）
+		// 同期ゾーン（v2.2 §26: 同期モード時は共有欄〜カレンダーを枠線で囲み色を変える）
+		const srv = ctx.room.srvOn === true || ctx.room.srvOn === 'true';
+		const zone = Vw.div(this.main, { class: 'ir-seczone' + (srv ? ' ir-srvon' : '') });
+		ctx._zone = zone;
 		// 共有部（§9.1: ファイル input → share → setThumb → rebuild → M broadcast[スロットル]）
-		const sb = Vw.div(this.main, { class: 'ir-sec' });
+		const sb = Vw.div(zone, { class: 'ir-sec' });
 		const fi = Vw.ipt(sb, { type: 'file', accept: 'image/*', multiple: 'multiple' });
 		Vw.aC(fi, 'ir-file');
 		Vw.change(fi, async () => {
@@ -972,7 +994,7 @@ export class RoomApp {
 			if (ctx.cal) ctx.cal.setThumbPx(v);
 			if (this.opfsOk) AppSettings.set('THUMB_PX', v).catch(() => {}); // 永続（次回起動時も同サイズ）
 		};
-		const calHost = Vw.div(this.main, {});
+		const calHost = Vw.div(zone, {});
 		if (!ctx.cal) {
 			ctx.cal = new RoomCalendar({ parent: calHost, cfg: this.cfg, collection: ctx.collection, slices: { slicesOf: (u, i) => ctx.sheet.slicesOf(u, i) }, transfer: ctx.transfer, img: { bodyOf: h10 => this.bodyOf(h10) } });
 			ctx.cal.sc.max = ctx.mode === 'server' ? (this.cfg.SRV_SCACHE_MAX || 8) : (this.cfg.SCACHE_MAX || 64); // サーバーモード低メモリ化 v1.3
@@ -1067,6 +1089,7 @@ export class RoomApp {
 				Toast(t('msg.zip.part', { n }));
 				this.dl(p.blob, p.name);
 			});
+			if (n) Toast(t('msg.dl.ok'), 10000); // v2.2 §26: 一括 DL も完了表示
 			this.usageDirty();
 		} catch (e) {
 			ef(e, 'room_app.bulk');
@@ -1352,7 +1375,7 @@ export class RoomApp {
 		const row = Vw.div(box, { class: 'ir-mbtns' });
 		const dl = Vw.btn(row, { class: 'ir-btn' }); // DL のみ（保存は自動確定のため廃止、追加仕様）
 		Vw.sT(dl, t('btn.dl'));
-		Vw.click(dl, () => this.dl(blob, (nm || h10) + '.' + ext));
+		Vw.click(dl, () => this.dl(blob, (nm || h10) + '.' + ext, true)); // v2.2 §26
 		if (ctx && !ctx.collection.isTrashed(h10)) { // ごみ箱へ（§9.8）。ボタンは右端（追加仕様）
 			const tr = Vw.btn(row, { class: 'ir-btn warn ir-trright' });
 			Vw.sT(tr, t('btn.trash'));
@@ -1393,7 +1416,7 @@ export class RoomApp {
 			Vw.sT(png, t('btn.qr.png'));
 			Vw.click(png, async () => {
 				const b = await QRTool.pngBlob(r.canvas);
-				if (b) this.dl(b, file || 'qr.png');
+				if (b) this.dl(b, file || 'qr.png', true); // v2.2 §26: 「ダウンロードしました」10 秒
 			});
 			if (note) Vw.add(side, 'div', { class: 'ir-qrnote' }).textContent = note;
 		} catch (e) {
@@ -1502,15 +1525,31 @@ export class RoomApp {
 			pushOa();
 		});
 		paintOa();
-		// サーバーモード許可 ON/OFF（作成者専権・随時、§6.8）
+		// モード切替（§6.8 作成者専権）。v2.2 §26: ON/OFF トグルの代わりに 同期/通常 のラジオスイッチ
 		const r2 = Vw.div(box, { class: 'ir-row' });
-		const svOn = Toggle({ parent: r2, label: 'btn.srv.toggle', onChange: async on => {
-			ctx.room.srvOn = !!on;
-			ctx.room.cg = Date.now();
-			await this.pushC(ctx);
-			Toast(t(on ? 'msg.srv.on' : 'msg.srv.off'));
-		} });
-		svOn.set(ctx.room.srvOn === true || ctx.room.srvOn === 'true');
+		Vw.add(r2, 'span').textContent = t('lbl.mode');
+		const srvCur = ctx.room.srvOn === true || ctx.room.srvOn === 'true';
+		const rs = Vw.add(r2, 'span', { class: 'ir-rsw' });
+		const mkMode = (on, key) => {
+			const lb = Vw.add(rs, 'label', { class: 'ir-rw' });
+			const ip = Vw.ipt(lb, { type: 'radio', name: 'ir-mode' });
+			ip.checked = srvCur === on;
+			Vw.add(lb, 'span').textContent = t(key);
+			Vw.ael(ip, 'change', async () => {
+				if (!ip.checked) return;
+				try {
+					ctx.room.srvOn = on;
+					ctx.room.cg = Date.now();
+					await this.pushC(ctx);
+					Toast(t(on ? 'msg.srv.on' : 'msg.srv.off'));
+					this.renderRoom(ctx.rid); // 同期枠（§26）を即時反映
+				} catch (e) {
+					ef(e, 'room_app.srvMode');
+				}
+			});
+		};
+		mkMode(true, 'mode.sync');
+		mkMode(false, 'mode.normal');
 		// 退室・タブ閉じる（§5.2）
 		const r3 = Vw.div(box, { class: 'ir-row' });
 		const lv = Vw.btn(r3, { class: 'ir-btn warn' });

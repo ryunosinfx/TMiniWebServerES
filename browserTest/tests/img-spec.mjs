@@ -118,7 +118,7 @@ await A.click('.ir-subtab:has-text("画像")');
 // サーバーモード許可 → ログアウト → サーバーモードで再ログイン
 await A.click('button[aria-label="部屋設定"]'); // v2.0 §24: 歯車絵文字化
 await A.waitForSelector('.ir-mbx', { timeout: 5000 });
-await A.click('.ir-mbx .ir-toggle:has-text("サーバーモード切替") input[type=checkbox]');
+await A.click('.ir-mbx .ir-rw:has-text("同期") input[type=radio]'); // v2.2 §26: トグル→同期/通常ラジオ
 await A.waitForSelector('.ir-toast', { timeout: 5000 });
 await A.click('.ir-mclose');
 await A.click('button:has-text("ログアウト")');
@@ -519,6 +519,64 @@ ck('ctrlNoOverlap', await B.evaluate(() => {
 	if (!c || !box) return false;
 	return box.getBoundingClientRect().bottom <= c.getBoundingClientRect().top + 2;
 }));
+// ---- v2.2 §26 ----
+await A.click('button[aria-label="部屋設定"]');
+await A.waitForSelector('.ir-mbx h3', { timeout: 10000 });
+await A.click('.ir-mbx button:has-text("パスワード発行")'); // 平文 pw は再発行後に.menu 内 QR 生成可能（§6.4）
+await A.waitForSelector('.ir-mbx .ir-qrrow canvas', { timeout: 15000 });
+ck('qrQuiet2', await A.evaluate(() => {
+	const cv = document.querySelector('.ir-mbx canvas.ir-qrimg');
+	if (!cv) return false;
+	const S = cv.width,
+		g = cv.getContext('2d'),
+		d = g.getImageData(0, 0, S, S).data,
+		white = (x, y) => d[(y * S + x) * 4] >= 128;
+	for (let i = 0; i < S; i++) for (let o = 0; o < 4; o++) if (!(white(i, o) && white(i, S - 1 - o) && white(o, i) && white(S - 1 - o, i))) return false; // 四周 4px 以上が白
+	let first = -1;
+	for (let y = 4; y < S && first < 0; y++) {
+		for (let x = 4; x < S; x++) if (!white(x, y)) {
+			first = y;
+			break;
+		}
+	}
+	return first >= 4 && (first + 1) / 2 >= 2 && first <= S * 0.08; // 白縁 = 2 モジュール（cell ≧ 2・縁は 8% 以内）
+}));
+ck('modeRadio', await A.evaluate(() => {
+	const bx = [...document.querySelectorAll('.ir-mbx')].pop();
+	const rs = [...bx.querySelectorAll('input[type="radio"][name="ir-mode"]')];
+	return rs.length === 2 && rs.filter(i => i.checked).length === 1;
+}));
+await A.waitForTimeout(4500); // パスワード発行トースト（4s）の消灯待ち
+await A.click('.ir-mbx button:has-text("PNG 保存")');
+await A.waitForSelector('.ir-toast:has-text("ダウンロードしました")', { timeout: 5000 });
+ck('dlToast', true);
+await A.waitForTimeout(9200);
+ck('dlToastPersist', (await A.locator('.ir-toast').count()) === 1);
+await A.waitForTimeout(2000);
+ck('dlToastEnd', (await A.locator('.ir-toast').count()) === 0);
+await A.click('.ir-mclose');
+ck('hdrModeRadio', await B.evaluate(() => document.querySelectorAll('.ir-hd input[type="radio"][name="ir-hdrmode"]').length === 2));
+ck('syncZoneOn', await B.evaluate(() => {
+	const z = document.querySelector('.ir-seczone');
+	if (!z || !z.classList.contains('ir-srvon')) return false;
+	const g = getComputedStyle(z);
+	return g.borderTopWidth === '2px' && g.borderTopStyle === 'solid' && !!z.querySelector('.ir-file') && !!z.querySelector('.ir-roomcal');
+}));
+ck('fileBrighter', await B.evaluate(() => {
+	const fi = document.querySelector('.ir-file');
+	if (!fi) return false;
+	const bg = getComputedStyle(fi).backgroundColor;
+	return bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent';
+}));
+const D = await mk('D');
+await D.goto(BASE + '/img_room.html');
+await D.waitForSelector('button:has-text("部屋作成")', { timeout: 15000 });
+await D.click('button:has-text("部屋作成")');
+await D.waitForSelector('input[name="ir-cpw"]', { timeout: 10000 });
+await D.waitForTimeout(900);
+ck('pwDefault', (await D.inputValue('input[name="ir-cpw"]')).length >= 8);
+ck('pwRegenLabel', (await D.locator('button:has-text("パスワード再作成")').count()) === 1);
+await D.close();
 
 console.log(JSON.stringify({ engine: name, room: ROOM, checks, errors }, null, 1));
 const bad = errors.length || Object.values(checks).some(v => !v);

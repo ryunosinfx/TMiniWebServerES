@@ -197,9 +197,12 @@ const fsShot = async (h, tag, expAR) => {
 		if (!bx) return null;
 		const im = bx.querySelector('img.ir-img');
 		const r = im.getBoundingClientRect();
+		const sc = Math.min(r.width / im.naturalWidth, r.height / im.naturalHeight); // object-fit: contain の実描画サイズ
 		return {
 			w: r.width,
 			h: r.height,
+			rw: im.naturalWidth * sc,
+			rh: im.naturalHeight * sc,
 			vw: innerWidth,
 			vh: innerHeight,
 			other: [...bx.children].filter(c => !c.classList.contains('ir-imgwrap') && !c.classList.contains('ir-fsc') && getComputedStyle(c).display !== 'none').length,
@@ -209,7 +212,7 @@ const fsShot = async (h, tag, expAR) => {
 	await p.keyboard.press('Escape'); // dlg 閉じる（エスケープ）
 	await p.waitForTimeout(600);
 	ck('fsOnly' + tag, !!st && st.other === 0, st ? 'other=' + st.other : 'no fs');
-	return !!st && st.w <= st.vw + 1 && st.h <= st.vh + 1 && Math.abs(st.w / st.h - expAR) < 0.04;
+	return !!st && st.rw <= st.vw + 1 && st.rh <= st.vh + 1 && Math.abs(st.rw / st.rh - expAR) < 0.04 && (st.rw >= 0.95 * st.vw || st.rh >= 0.95 * st.vh); // v2.2 §26: 画面いっぱいまで拡大
 };
 ck('fsWide169', await fsShot(r[0], 'wide', 16 / 9));
 ck('fsTall916', await fsShot(r[1], 'tall', 270 / 480));

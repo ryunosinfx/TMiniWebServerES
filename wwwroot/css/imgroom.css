@@ -174,6 +174,11 @@ body {
 }
 .ir-file {
 	min-height: 44px;
+	/* v2.2 §26: 「画像ファイルが選択されていません」領域をやや明るくして判別しやすく */
+	background: color-mix(in srgb, var(--ir-bg) 76%, #ffffff);
+	border: 1px dashed var(--ir-line);
+	border-radius: 8px;
+	padding: 6px 8px;
 }
 .ir-crd {
 	display: flex;
@@ -430,6 +435,34 @@ body {
 .ir-ctrlbar .ir-calbar {
 	margin: 0;
 }
+.ir-seczone {
+	/* v2.2 §26: 同期モード時のみ共有欄〜カレンダーを枠線で囲み色を変える */
+	border: 2px solid transparent;
+	border-radius: 10px;
+	padding: 4px;
+}
+.ir-seczone.ir-srvon {
+	border-color: var(--ir-accent);
+	background: color-mix(in srgb, var(--ir-accent) 10%, transparent);
+}
+.ir-rsw {
+	/* v2.2 §26: 同期/通常 ラジオスイッチ */
+	display: inline-flex;
+	border: 1px solid var(--ir-line);
+	border-radius: 8px;
+	overflow: hidden;
+}
+.ir-rw {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 10px;
+	cursor: pointer;
+}
+.ir-rw:has(input:checked) {
+	background: var(--ir-accent);
+	color: #fff;
+}
 .ir-calbar {
 	/* v2.0 §24: 日/週/月は下部タブ（サムネの後）。行高は文字サイズギリギリ、行間 1px */
 	display: flex;
@@ -484,6 +517,21 @@ body {
 .ir-fs .ir-imgwrap {
 	flex: 1;
 	min-height: 0;
+	max-height: none;
+	height: 100%;
+	border: 0;
+	margin: 0;
+	border-radius: 0;
+	overflow: hidden;
+}
+.ir-fs img.ir-img {
+	/* 画面全体へ拡大（小画像も viewport いっぱいに。拡大縮小は zoom transform で従来どおり） */
+	width: 100%;
+	height: 100%;
+	max-width: none;
+	max-height: none;
+	object-fit: contain;
+	margin: 0;
 }
 .ir-fs .ir-imgwrap.fit img {
 	max-height: 100%;

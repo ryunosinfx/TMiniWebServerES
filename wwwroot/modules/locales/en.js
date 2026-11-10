@@ -83,7 +83,7 @@ export default {
 	'btn.copy': 'Copy',
 	'btn.scan': 'Scan QR',
 	'btn.qr.png': 'Save PNG',
-	'btn.pw.auto': 'Generate password',
+	'btn.pw.auto': 'Regenerate password',
 	'tab.view.imgs': 'Images', // addendum: in-room sub tabs
 	'tab.view.qrurl': 'URL QR',
 	'tab.view.qrpw': 'Password QR',
@@ -109,6 +109,9 @@ export default {
 	'msg.slide.exit': 'Stop slideshow?',
 	'btn.confirm.keep': 'Continue',
 	'btn.confirm.stop': 'Exit',
+	'msg.dl.ok': 'Downloaded',
+	'mode.sync': 'Sync',
+	'mode.normal': 'Normal',
 	'btn.trash.ico': '🗑️',
 	'btn.trash.restore': 'Restore',
 	'lbl.qr.text': 'QR text',

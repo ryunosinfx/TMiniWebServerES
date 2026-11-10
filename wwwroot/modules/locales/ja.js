@@ -83,7 +83,7 @@ export default {
 	'btn.copy': 'コピー',
 	'btn.scan': 'QR スキャン', // §5.4
 	'btn.qr.png': 'PNG 保存',
-	'btn.pw.auto': 'パスワード自動生成', // §6.3
+	'btn.pw.auto': 'パスワード再作成', // §6.3（v2.2 §26: 既定で自動生成済み→再作成）
 	'tab.view.imgs': '画像', // 追加仕様: 部屋ビュー内サブタブ
 	'tab.view.qrurl': 'URL QR',
 	'tab.view.qrpw': 'パスワード QR',
@@ -110,6 +110,9 @@ export default {
 	'btn.confirm.keep': '続ける',
 	'btn.confirm.stop': '終了',
 	'btn.trash.ico': '🗑️',
+	'msg.dl.ok': 'ダウンロードしました', // v2.2 §26
+	'mode.sync': '同期',
+	'mode.normal': '通常',
 	'btn.trash.restore': '復元', // §5.6
 	'lbl.qr.text': 'QR テキスト',
 	'lbl.autodl.count': '自動 DL 済み', // §5.7 台帳件数

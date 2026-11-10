@@ -55,11 +55,13 @@ await p.evaluate(async n => {
 	const c = window.__IRAPP.activeCtx();
 	const DAY = 86400000,
 		now = Date.now();
+	const t0 = new Date(); // v2.2 対応: 深夜実行でも日跨ぎで bucket が揺れないよう 正午ベースの ts にする
+	t0.setHours(0, 0, 0, 0);
 	const offs = [1, 1, 2, 9, 10].slice(0, n);
 	const man = [],
 		byDay = new Map();
 	for (let i = 0; i < offs.length; i++) {
-		const ts = now - offs[i] * DAY - 3600000 * (1 + (i % 10));
+		const ts = t0.getTime() - offs[i] * DAY + 3600000 * (11 + (i % 10));
 		const hh = 'sec' + String(i).padStart(4, '0') + 'AAAAAAAAAAAAAAAA';
 		const m = { h: hh, n: 'c2Nhbg' + i, r: [c.nameB64U], u: c.uid, ts, t: 'image/png', l: 500, s: 400, d: null };
 		const day = Math.floor(ts / DAY);
@@ -97,30 +99,54 @@ const day = await p.evaluate(() => {
 		mounted: document.querySelectorAll('.cal-day').length,
 	};
 });
+// 期待値は ts 生成(offsets)と当日から機械生成（日付/実行時刻に依存しない）
 const exp = await p.evaluate(() => {
 	const p2 = n => (n < 10 ? '0' + n : '' + n),
 		D = 86400000,
-		t = new Date();
-	t.setHours(0, 0, 0, 0);
-	const offs = [0, -1, -2, -3, -8, -9, -10, -11];
-	let prev = null;
-	const out = [];
-	for (const o of offs) {
-		const d = new Date(t.getTime() + o * D);
-		const y = d.getFullYear(),
+		t0 = new Date();
+	t0.setHours(0, 0, 0, 0);
+	const cur = t0.getTime();
+	const offs = [1, 1, 2, 9, 10]; // synth と同一 offsets（正午ベース ts → 日 bucket は t0-offs*D）
+	const imgs = offs.map(o => {
+		const d = new Date(t0.getTime() - o * D);
+		d.setHours(0, 0, 0, 0);
+		return d.getTime();
+	});
+	const imgSet = new Set(imgs),
+		units = new Set(imgs);
+	for (const u of imgs) for (const v of [u + D, u - D]) if (v <= cur) units.add(v);
+	let anc = cur;
+	while (imgSet.has(anc)) anc -= D;
+	units.add(anc);
+	const arr = [...units].sort((a, b) => b - a);
+	let prevY = null,
+		prevM = null;
+	const heads = arr.map((u, i) => {
+		const d = new Date(u),
+			y = d.getFullYear(),
 			m = p2(d.getMonth() + 1),
-			dd = p2(d.getDate());
-		out.push(!prev || prev[0] !== y ? `${y}/${m}/${dd}` : prev[1] !== m ? `${m}/${dd}` : dd);
-		prev = [y, m];
+			dd = p2(d.getDate()),
+			lab = i === 0 || prevY !== y ? `${y}/${m}/${dd}` : prevM !== m ? `${m}/${dd}` : dd;
+		prevY = y;
+		prevM = m;
+		return lab;
+	});
+	const lens = arr.map(u => imgs.filter(x => x === u).length);
+	// 非表示ギャップ: 最古ユニット〜当日の間で units に無い日（ラベル化して不表示確認）
+	const hidden = [];
+	const oldest = Math.min(...arr);
+	for (let v = oldest + D; v < cur; v += D) if (!units.has(v)) {
+		const d = new Date(v);
+		hidden.push(p2(d.getDate()));
 	}
-	return out;
+	return { heads, lens, n: arr.length, hidden, last: heads[heads.length - 1] };
 });
-ck('daySections', day.heads.length === 8 && day.mounted >= 3, 'n=' + day.heads.length + ' mounted=' + day.mounted + ' heads=' + JSON.stringify(day.heads));
-ck('dayLabels', JSON.stringify(day.heads) === JSON.stringify(exp), `exp=${JSON.stringify(exp)}`);
-// 空日で表示されるのは隣接分のみ: 3 日前(07)は表示、4〜7 日前(06,05,04,03)は不表示
-ck('dayGapHidden', !day.heads.some(h => ['03', '04', '05', '06'].includes(h)) && day.heads.includes('07'), JSON.stringify(day.heads));
-ck('dayEmptyHeadsDateOnly', /^\d{4}\/\d{2}\/\d{2}$/.test(day.heads[0]) && day.lens[0] === 0 && day.lens[1] === 2, JSON.stringify(day.lens));
-ck('oneImgOneSlot', day.lens.reduce((a, b) => a + b, 0) === 5 && JSON.stringify(day.lens) === JSON.stringify([0, 2, 1, 0, 0, 1, 1, 0]), JSON.stringify(day.lens));
+ck('daySections', day.heads.length === exp.n && day.mounted >= 3, 'n=' + day.heads.length + ' exp=' + exp.n + ' mounted=' + day.mounted + ' heads=' + JSON.stringify(day.heads));
+ck('dayLabels', JSON.stringify(day.heads) === JSON.stringify(exp.heads), `exp=${JSON.stringify(exp.heads)}`);
+// 空日で表示されるのは隣接分のみ: ギャップ内部の日は不表示、隣接空日は heads に存在
+ck('dayGapHidden', !day.heads.some(h => exp.hidden.includes(h)) && exp.lens.some((l, i) => l === 0 && i > 0), JSON.stringify({ heads: day.heads, hidden: exp.hidden }));
+ck('dayEmptyHeadsDateOnly', /^\d{4}\/\d{2}\/\d{2}$/.test(day.heads[0]) && exp.lens[0] === 0 && exp.lens[1] === 2, JSON.stringify(exp.lens));
+ck('oneImgOneSlot', day.lens.reduce((a, b) => a + b, 0) === 5 && JSON.stringify(day.lens) === JSON.stringify(exp.lens), JSON.stringify({ got: day.lens, exp: exp.lens }));
 // DOM 走査: ページを最後までスクロールして全スロットが重複なく 1 回描画されること（窓実体化の追従確認）
 const seen = await p.evaluate(async () => {
 	const u = new Set();
@@ -133,7 +159,7 @@ const seen = await p.evaluate(async () => {
 	}
 	return { uniq: u.size, cellMax, lastHead: [...document.querySelectorAll('.cal-day .cal-ch')].pop().textContent.trim() };
 });
-ck('scanAllSlots', seen.uniq === 5 && seen.cellMax <= 12 && seen.lastHead === '30', JSON.stringify(seen));
+ck('scanAllSlots', seen.uniq === 5 && seen.cellMax <= 12 && seen.lastHead === exp.last, JSON.stringify({ seen, last: exp.last }));
 
 // ② 月モード: 現月 + 隣接前月 + 直近空アンカー(前々月)。ラベルは YYYY/MM。空月は見出しのみ
 await p.click('.ir-calmode:text-is("月")');
@@ -147,8 +173,32 @@ const mo = await p.evaluate(() => {
 	})();
 	return { heads: x.sec.map((s, i) => x.secLabel(i)), lens: x.sec.map(s => s.v.length), now };
 });
-ck('monthSections', mo.heads.length === 3 && mo.heads[0] === mo.now && mo.heads.every(h => /^\d{4}\/\d{2}$/.test(h)), JSON.stringify(mo.heads));
-ck('monthEmptyTail', JSON.stringify(mo.lens) === JSON.stringify([4, 1, 0]), JSON.stringify(mo.lens));
+const mexp = await p.evaluate(() => {
+	const p2 = n => (n < 10 ? '0' + n : '' + n),
+		D = 86400000,
+		t0 = new Date();
+	t0.setHours(0, 0, 0, 0);
+	const cur = t0.getFullYear() * 12 + t0.getMonth();
+	const offs = [1, 1, 2, 9, 10],
+		imgs = offs.map(o => {
+			const d = new Date(t0.getTime() - o * D);
+			d.setHours(0, 0, 0, 0);
+			return d;
+		}),
+		mk = d => d.getFullYear() * 12 + d.getMonth(),
+		imgM = imgs.map(mk),
+		imgSet = new Set(imgM),
+		units = new Set(imgM);
+	for (const u of imgM) for (const v of [u + 1, u - 1]) if (v <= cur) units.add(v);
+	let anc = cur;
+	while (imgSet.has(anc)) anc--;
+	units.add(anc);
+	const arr = [...units].sort((a, b) => b - a);
+	const lab = u => `${Math.floor(u / 12)}/${p2((u % 12) + 1)}`;
+	return { heads: arr.map(lab), lens: arr.map(u => imgs.filter(d => mk(d) === u).length), now: lab(cur) };
+});
+ck('monthSections', JSON.stringify(mo.heads) === JSON.stringify(mexp.heads) && mo.heads[0] === mexp.now && mo.heads.every(h => /^\d{4}\/\d{2}$/.test(h)), JSON.stringify({ got: mo.heads, exp: mexp.heads }));
+ck('monthEmptyTail', JSON.stringify(mo.lens) === JSON.stringify(mexp.lens) && mexp.lens[mexp.lens.length - 1] === 0, JSON.stringify({ got: mo.lens, exp: mexp.lens }));
 
 // ③ 週モード: 見出しは週開始日(周日)の YYYY/MM/DD のみ。週毎に改行（セクション）
 await p.click('.ir-calmode:text-is("週")');
@@ -167,14 +217,36 @@ const wk = await p.evaluate(() => {
 			b = h.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
 		return new Date(+a[1], +a[2] - 1, +a[3]) - new Date(+b[1], +b[2] - 1, +b[3]) === 7 * 86400000;
 	});
-	const t = new Date();
-	t.setHours(0, 0, 0, 0);
-	const p2 = n => (n < 10 ? '0' + n : '' + n),
-		su = new Date(t.getTime() - t.getDay() * 86400000);
-	return { hs, lens: x.sec.map(s => s.v.length), sundays, step7, first: `${su.getFullYear()}/${p2(su.getMonth() + 1)}/${p2(su.getDate())}` };
+	return { hs, lens: x.sec.map(s => s.v.length), sundays, step7 };
 });
-ck('weekSections', wk.hs.length === 4 && wk.sundays && wk.step7 && wk.hs[0] === wk.first, JSON.stringify(wk.hs));
-ck('weekEmptyTail', JSON.stringify(wk.lens) === JSON.stringify([3, 1, 1, 0]), JSON.stringify(wk.lens));
+const wexp = await p.evaluate(() => {
+	const p2 = n => (n < 10 ? '0' + n : '' + n),
+		D = 86400000,
+		t0 = new Date();
+	t0.setHours(0, 0, 0, 0);
+	const wk0 = x => x - new Date(x).getDay() * D, // 日曜起点 ms（日本に DST なし安全）
+		cur = wk0(t0.getTime()),
+		offs = [1, 1, 2, 9, 10],
+		imgs = offs.map(o => {
+			const d = new Date(t0.getTime() - o * D);
+			d.setHours(0, 0, 0, 0);
+			return wk0(d.getTime());
+		}),
+		imgSet = new Set(imgs),
+		units = new Set(imgs);
+	for (const u of imgs) for (const v of [u + 7 * D, u - 7 * D]) if (v <= cur) units.add(v);
+	let anc = cur;
+	while (imgSet.has(anc)) anc -= 7 * D;
+	units.add(anc);
+	const arr = [...units].sort((a, b) => b - a),
+		lab = u => {
+			const d = new Date(u);
+			return `${d.getFullYear()}/${p2(d.getMonth() + 1)}/${p2(d.getDate())}`;
+		};
+	return { heads: arr.map(lab), lens: arr.map(u => imgs.filter(x => x === u).length) };
+});
+ck('weekSections', wk.sundays && wk.step7 && JSON.stringify(wk.hs) === JSON.stringify(wexp.heads), JSON.stringify({ got: wk.hs, exp: wexp.heads }));
+ck('weekEmptyTail', JSON.stringify(wk.lens) === JSON.stringify(wexp.lens) && wexp.lens[wexp.lens.length - 1] === 0, JSON.stringify({ got: wk.lens, exp: wexp.lens }));
 ck('noPageErrors', errors.length === 0, errors.slice(0, 3).join(' | '));
 if (fails.length) {
 	console.log('SEC FAIL:', fails.join(','));

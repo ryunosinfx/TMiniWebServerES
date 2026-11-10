@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.1
+- ステータス: ドラフト v2.2
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1105,3 +1105,22 @@ msg  ≒ 11.0 KB
 ### テスト（「SPEC OK」「MOBILE OK」）
 - img-spec `ctrlFixedBottomLeft`（fixed・左 ≦12px・下端 ≦12px・タブ/サイズ行を内包）`ctrlNoOverlap`（カレンダー本体の下端がバー上端まで）。
 - img-mobile `ctrlVisiblePhone`（スマホビューポート 390×844 で固定バーが常時可視・モード 3+サイズ 4 ボタン）。
+
+## 26. 追加仕様 v2.2: QR 白縁 / pw 自動既定 / ファイル領域明色 / 同期ゾーン枠+ラジオ / 全画面拡大 / DL 完了表示
+確定事項（2026-11-10 の追加指示で確定）:
+1. **QR は必ず 2 タイル分の白縁**: ライブラリ描画はキャンバス余りが 1 モジュール未満で静域が不定だった。QRTool.make を改め、draw 経由で得た QR 像から **2 モジュール分の白縁を確定適用**した canvas を自前描画し、それを jsQR で検証する（PNG DL も同じ canvas = 白縁入り）。
+2. **部屋作成のパスワードは自動生成値をデフォルト設定**。ボタンは「パスワード自動生成」→**「パスワード再作成」**（生成値をそのまま作成し、再生成は同じボタン）。
+3. **ファイル未選択領域を明るく**: `input[type=file]`(.ir-file) に明色背景＋破線枠を付け、周囲と判別しやすくする。
+4. **同期モードの視覚化**: 参加者/作成者の部屋画面で、**共有欄〜カレンダーを含む区域(.ir-seczone)を同期モード時にアクセント色の枠線で囲み地色を変える**。モード切替は「ON/OFF トグル」では意味が分かりづらいため、**ヘッダー（通常⇄同期）と部屋メニューのモード欄をラジオスイッチ「同期/通常」に統一**（参加フォームの 通常/同期/サーバー ラジオと同じ語義）。部屋メニューで切替ら C 送出→受信側のゾーン枠/色も `roomUpdate` でライブ反映。
+5. **全画面表示は画面全体へ拡大**: 従来は .ir-imgwrap 70vh/.ir-img 60vh の上限が全画面でも残り小さかった。fs 中は上限を無効化し img をラップ いっぱい（object-fit: contain、黒地レターボックス）へ拡大する。
+6. **DL 成功表示**: PNG 保存・ビューア DL・ZIP 一括完了時、「ダウンロードしました」トーストを **10 秒**表示（`dl(blob, name, toast)`）。
+
+### 実装
+- `qr_tool.js`: quietCanvas(model,size,q=2) 追加、make は白縁 canvas を検証・返却。
+- `room_app.js`: 作成フォーム doGen 起動時実行（pw 既定）・ボタンは再作成意味に。ヘッダーモードをラジオ（`ir-rsw/ir-rw`、hdr.mode.sync/normal ラベル・言語切替追従）。roomMenu モード欄をラジオ（切替で pushC+renderRoom+`roomUpdate` でゾーン反映）。`roomUpdate` で `.ir-srvon` 切替。dl toast。
+- `css/imgroom.css`: .ir-file 明色/破線枠、.ir-seczone(.ir-srvon)、.ir-rsw/.ir-rw、fs img 全面拡大。
+- locale: `msg.dl.ok`/`lbl.mode`(既存)/`mode.sync`/`mode.normal`、`btn.pw.auto` 文言変更。
+
+### テスト（「SPEC OK」「RATIO OK」）
+- `qrQuiet2`（四周 4px 以上白・縁=2 モジュール相当で 8% 以内）/ `pwDefault`（生成値 ≧8 文字）/ `pwRegenLabel`（「パスワード再作成」）/ `fileBrighter`（背景有色）/ `syncZoneOn`（B 側 .ir-seczone.ir-srvon・2px 実線枠・共有欄+カレンダー内包）/ `modeRadio`（メニュー 2 択）/ `hdrModeRadio`（ヘッダー 2 択）/ `dlToast`+`dlToastPersist`（約 10 秒表示）+`dlToastEnd`。
+- img-ratio 全画面検査に**画面いっぱい拡大**（実描画が幅 95%以上 or 高さ 95%以上、aspect 維持）を追加。
