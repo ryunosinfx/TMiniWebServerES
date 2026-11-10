@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.6
+- ステータス: ドラフト v2.7
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1181,3 +1181,28 @@ msg  ≒ 11.0 KB
 ### テスト（「SPEC OK」）
 - `wsOpfsStored`（`OPFS.r('user_settings.json')` の JSON に WSBASE 単一値）/ `wsBootRestore`（reload 後 boot 復元）/ `wsMultiReject`（2 URL 入力→拒否 toast・設定不変）。
 - 既存検査の堅牢化: `fsKeyNext/fsKeyPrev` は h3 文字列でなく `_vBox._h10` ベース（同名画像依存の除去）、DL トーストは先行トーストの detached 待ち。
+
+## 32. 確認記録: 検証オリジンは Web ホスト基準（WebSocket 接続先はチェック対象外）
+質問（2026-11-11）に対する確認結果:
+1. **チェックが使うオリジンは Web ホスト（ページ）の `location.origin`**。seed ハッシュの salt（§4/§7.3 `_seedOf`）、認証採決の `originHashes`（W の ho/hor、§6.2）、許可オリジン oa の既定値（§6.6）— いずれも `location.origin` で算出し、WSBASE（WebSocket 接続先）の影響を受けない。
+2. **WebSocket 接続先オリジンは認証・検証に不関与**。`getWsBase()` は `wsUrl()`（接続 URL 生成）と表示にのみ使用。
+3. サーバー側（TMiniWebServerES.js / SampleServer.js / TMiniWebServerUtil.js、読取のみで確認）には **Origin ヘッダの検査箇所は存在しない**（§15.9 記録: サーバ変更なし・WS ハンドシェイクの Origin 無検査）。よって WebSocket オリジンは最初からチェック対象外であり、追加の変更は不要。
+### テスト
+- `wsNotInAuth`: WSBASE を別オリジンへ変更しても、ページ算出 seed＝セッション実経路 `_seedOf` の seed（Web origin 基準で一致）、WS 接続先オリジンで算出した seed/originHashes とは異なる（検証値が Web origin 基準で安定することを回帰固定）。
+
+## 33. 追加仕様 v2.7: 「パスワードまたはオリジンが違います」の原因整理と QR 貼付け耐性
+質問（2026-11-11）: エラー `msg.auth.fail`「パスワードまたはオリジンが違います」が出る。QR 認証 QR をコピーすると付いてくる **TMIWR1: はパスワードの一部か?**
+
+**回答**:
+1. **TMIWR1: はパスワードの一部ではない**。§5.5 の QR データ形式のプレフィックスで、認証 QR の内容は `TMIWR1:<部屋名b64url>:<パスワード>`（`qrPack`）。パスワード本体は最後の `:` の後ろ（自動生成値は b64url 512bit で `:` を含まない）。
+2. エラーの 2 原因（`msg.auth.fail`＝採決不 OK、§6.2/§12）:
+   - **パスワード不一致**: パック文字列（TMIWR1:…）や他部屋のパスワードをそのまま入力していた。→ **v2.7 対策**: ログイン/作成/再試行のパスワード欄はパック・プレフィックスを**自動認識して除去**（`RoomApp.pwFromField`）。QR のコピーをそのまま貼付けても認証できる。
+   - **オリジン不一致**: seed は `H(パスワード, 部屋名, **Web ホスト origin**, salt)`（§4/§7.3）。同一パスワードでも **127.0.0.1 と localhost と LAN IP は別オリジン**で seed が違う。対策は (a) 作成時と同じ URL（部屋 URL QR をスキャン）で参加、または (b) §6.6 で作成者がクロスオリジン許可を有効化し許可オリジン管理（oa）に参加側オリジンを登録。§32 のとおり WebSocket 接続先オリジンはこの判定に関与しない。
+3. **UI 追加**: 認証 QR の下に「**パスワードのみコピー**」ボタン（パックでなく本体だけをクリップボードへ、トースト確認）と説明注記「TMIWR1:… はデータ形式で、TMIWR1: はパスワードの一部ではありません」を QR パネル/部屋メニュー双方に設置。
+
+### 実装
+- `room_app.js`: `pwFromField`（tryLogin/doCreate 経路で適用。retryBox は lastTry 経由で自動カバー）。`pwCopyRow`（qrPanel qrpw と roomMenu QR 欄）。
+- locale: `btn.copy.pw`/`msg.copied.pw`/`qr.pw.note`（ja/en）。
+
+### テスト（「SPEC OK」）
+- `pwFromPack`（パック/`TMIWR1:<pw>`/素の値の 3 形式で本体抽出一致）/ `copyPwOnly`（クリップボード実読取で本体のみ・TMIWR1 非含有）/ `joinWithPack`（パック一式を貼付けた新規参加者 E が採決通過で入室）。

@@ -80,6 +80,9 @@ export default {
 	'btn.close': '閉じる', // §5.4
 	'btn.save': '保存',
 	'btn.dl': 'DL',
+	'btn.copy.pw': 'パスワードのみコピー',
+	'msg.copied.pw': 'パスワード本体のみをコピーしました',
+	'qr.pw.note': 'QR 内の TMIWR1:… はデータ形式（部屋名:パスワード）で、TMIWR1: はパスワードの一部ではありません。この欄へペーストしても自動認識します',
 	'btn.copy': 'コピー',
 	'btn.scan': 'QR スキャン', // §5.4
 	'btn.qr.png': 'PNG 保存',

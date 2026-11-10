@@ -15,7 +15,7 @@ import { ImgProc, SliceCache } from '../img_proc.js';
 import { QRTool } from '../qr_tool.js';
 import { QRScan } from '../qr_scan.js';
 import { Toggle, Badge, Toast, useLabel } from '../widgets.js';
-import { CFG, STORAGE, ridOf, qrPack, qrUnpack, IR, WS_PREFIX, getWsBase, setWsBase, wsNorm } from './ir_const.js';
+import { CFG, STORAGE, ridOf, qrPack, qrUnpack, IR, QR_PREFIX, WS_PREFIX, getWsBase, setWsBase, wsNorm } from './ir_const.js';
 import { Protocol } from './ir_protocol.js';
 import { RoomSession } from './room_session.js';
 import { Hibernate } from './hibernate.js';
@@ -407,7 +407,17 @@ export class RoomApp {
 	async ridOfNb(nb) {
 		return await ridOf(nb);
 	}
+	// v2.7 §33: QR 認証 QR のコピーはパック文字列（TMIWR1:<部屋名b64url>:<パスワード>）。
+	// 貼り付いた TMIWR1: はパスワードの一部ではないため、パスワード欄ではパック/プレフィックスを自動除去する。
+	static pwFromField(raw) {
+		const t = (raw || '').trim();
+		if (!t.startsWith(QR_PREFIX)) return t;
+		const u = qrUnpack(t);
+		if (u && u.pw) return u.pw;
+		return t.slice(QR_PREFIX.length).trim() || t; // TMIWR1:<pw> 形
+	}
 	async tryLogin({ rid, room, nb, uid, pw, mode, f }) {
+		pw = RoomApp.pwFromField(pw);
 		if (!rid) rid = await this.ridOfNb(nb); // 新規参加: 既存でなければ room.json は書かない（room_session の authOk 時保存想定）
 		const r = room || { nm: nb };
 		if (this.pendingNb) {
@@ -492,7 +502,7 @@ export class RoomApp {
 		Vw.click(go, async () => {
 			const nmRaw = nmIn.value.trim(),
 				uid = uidIn.value.trim(),
-				pw = pwIn.value;
+				pw = RoomApp.pwFromField(pwIn.value); // v2.7 §33: パック貼り付け耐性
 			if (!nmRaw || !uid || !pw) {
 				Toast(t(nmRaw ? (uid ? 'msg.form.uid' : 'msg.form.nm') : 'msg.form.nm'));
 				return;
@@ -1591,6 +1601,21 @@ export class RoomApp {
 			Vw.add(host, 'div', { class: 'ir-mut' }).textContent = t('msg.qr.verify.fail');
 		}
 	}
+	// v2.7 §33: 「パスワードのみコピー」行。QR パック（TMIWR1:…）ではなく本体だけを書き出す
+	pwCopyRow(host, ctx) {
+		const row = Vw.div(host, { class: 'ir-row' });
+		const bp = Vw.btn(row, { class: 'ir-btn' });
+		Vw.sT(bp, t('btn.copy.pw'));
+		Vw.click(bp, () => {
+			if (!ctx.plainPw) {
+				Toast(t('msg.qr.needpw'));
+				return;
+			}
+			Vw.copy(ctx.plainPw);
+			Toast(t('msg.copied.pw'));
+		});
+		Vw.add(row, 'span', { class: 'ir-mut' }).textContent = t('qr.pw.note');
+	}
 	qrPanel(ctx) { // サブタブの QR パネル（qrurl: 部屋 URL / qrpw: 認証 QR。作成者のみ呼ばれる）
 		const sec = Vw.div(this.main, { class: 'ir-sec' });
 		Vw.add(sec, 'h4').textContent = (ctx.sub === 'qrpw' ? '\ud83d\udd11 ' : '') + (ctx.sub === 'qrpw' ? t('tab.view.qrpw') : t('tab.view.qrurl'));
@@ -1605,6 +1630,7 @@ export class RoomApp {
 				secret: true,
 				note: t('lbl.qr.secret') + ' ' + t('lbl.qr.scan.pw'),
 			});
+			this.pwCopyRow(sec, ctx); // v2.7 §33: プレフィックス無しのパスワード本体コピー
 			return;
 		}
 		this.qrInto(sec, this.roomUrl(ctx), {
@@ -1636,6 +1662,7 @@ export class RoomApp {
 			}
 			this.qrInto(qrBox, qrPack(ctx.nb, ctx.plainPw), { file: ctx.rid + '.png', secret: true, note: t('lbl.qr.secret') });
 		};
+		this.pwCopyRow(box, ctx); // v2.7 §33: メニュー QR 欄にもパスワード本体コピー（QR 再生成と無関係に固定）
 		// パスワード再発行（新 seed 算出 → C 送出、§6.3/§8.3）
 		const r1 = Vw.div(box, { class: 'ir-row' });
 		const iss = Vw.btn(r1, { class: 'ir-btn' });

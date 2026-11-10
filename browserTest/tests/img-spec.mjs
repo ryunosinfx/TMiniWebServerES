@@ -717,6 +717,58 @@ await P3.click('.ir-mbx button:has-text("サイト既定")');
 await P3.waitForTimeout(400);
 ck('wsResetDefault', await P3.evaluate(() => import('/modules/imgroom/ir_const.js').then(m => m.getWsBase() === location.origin)));
 await P3.close();
+// v2.6 §32: 検証オリジンは Web ホスト基準。WebSocket 接続先オリジンは認証/検証に不関与
+ck('wsNotInAuth', await A.evaluate(async () => {
+	const m = await import('/modules/imgroom/ir_const.js'),
+		ac = await import('/modules/auth_challenge.js');
+	m.setWsBase('ws://elsewhere.example:9999'); // 接続先だけ別オリジン（接続は行わない）
+	try {
+		const c = window.__IRAPP.activeCtx(),
+			AC = ac.AuthChallenge,
+			pw = c.plainPw,
+			salt = c.room.pwSalt,
+			r = c.session._rounds();
+		if (!pw || !salt) return false;
+		const sWeb = await AC.seed(pw, c.room.nm, location.origin, salt, r), // ページ=Web ホスト(origin)基準
+			sSess = await c.session._seedOf(pw, salt), // 実セッションの seed 経路
+			sWs = await AC.seed(pw, c.room.nm, 'ws://elsewhere.example:9999', salt, r);
+		const oh = await AC.originHashes(location.origin, r),
+			ohWs = await AC.originHashes('ws://elsewhere.example:9999', r);
+		return sWeb === sSess && sWeb !== sWs && !!oh.ho && !!oh.hor && oh.ho !== ohWs.ho; // 検証値は常に Web origin 基準で安定
+	} finally {
+		m.setWsBase('');
+	}
+}));
+// ---- v2.7 §33: QR 認証 QR のコピー→貼付け耐性（TMIWR1: はパスワードの一部ではない）----
+const ppw = await A.evaluate(() => window.__IRAPP.activeCtx().plainPw);
+const pack = await A.evaluate(async () => {
+	const m = await import('/modules/imgroom/ir_const.js'),
+		c = window.__IRAPP.activeCtx();
+	return m.qrPack(c.room.nm, c.plainPw);
+});
+ck('pwFromPack', await A.evaluate(([pk, pp]) => {
+	const R = window.__IRAPP.constructor;
+	return R.pwFromField(pk) === pp && R.pwFromField('TMIWR1:' + pp) === pp && R.pwFromField(pp) === pp;
+}, [pack, ppw]));
+await A.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+await A.click('button[aria-label="部屋設定"]');
+await A.waitForSelector('.ir-mbx h3', { timeout: 10000 });
+await A.click('.ir-mbx button:has-text("パスワードのみコピー")');
+await A.waitForTimeout(300);
+const clip = await A.evaluate(async () => await navigator.clipboard.readText());
+ck('copyPwOnly', clip === ppw && !clip.includes('TMIWR1'), (clip || '').slice(0, 12));
+await A.click('.ir-mclose');
+await A.waitForTimeout(300);
+const E = await mk('E');
+await E.goto(BASE + '/img_room.html');
+await E.click('button:has-text("参加")');
+await E.fill('input[name="ir-nm"]', ROOM);
+await E.fill('input[name="ir-uid"]', 'ECHO');
+await E.fill('input[name="ir-pw"]', pack); // TMIWR1:<部屋名>:<パスワード> 一式をそのまま貼付け
+await E.click('.ir-frm button:has-text("ログイン")');
+await E.waitForSelector('input[type=file]', { timeout: 30000 });
+ck('joinWithPack', true);
+await E.close();
 
 console.log(JSON.stringify({ engine: name, room: ROOM, checks, errors }, null, 1));
 const bad = errors.length || Object.values(checks).some(v => !v);
