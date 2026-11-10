@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.4
+- ステータス: ドラフト v2.5
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1157,3 +1157,18 @@ msg  ≒ 11.0 KB
 ### テスト（「SPEC OK」）
 - `wsBtn`/`wsDefaultEmpty`/`wsBaseDefault`（=site origin）/ `wsQrQuiet`（TMIWS1: prefix・四周 4px 白縁）/ `wsApplied`（http→ws 正規化）/ `wsPersist`（reload 後も AppSettings 経由・debounce 500ms 考慮）/ `wsScanPng`（QR PNG 生成→scanFlow ファイル経路→`wss:` 変換）/ `wsResetDefault`。
 - カメラ読取自体は headless のため PNG 経路で検証（カメラ経路は §5.4 と同一実装）。
+
+## 30. 追加仕様 v2.5: 作成画面の接続設定 / QR デフォルト表示 / キー左右 / 確認ボタン整形
+確定事項（2026-11-11 の追加指示で確定）:
+1. **接続設定は部屋作成画面にも**出す（「⚙️ 接続設定」ボタンを作成フォームのボタン行に追加）。
+2. **接続設定の QR はデフォルト表示**（開いた時点で現在の URL の QR を描画。「QR 表示」は再描画）。
+3. **スライドショー・全画面表示でキーボード左右**: →=次へ、←=戻る（ts 降順の保有画像シーケンス。全画面のみでも有効）。確認ダイアログ表示中は無視。スライドショー中は手動送りでタイマ再アーム。左右でビューアを開き直し、全画面/slideshow 状態は `_fsPend/_slPend` で継続（§22 と同一機構）。
+4. **解除確認（続ける/終了）ボタン**: 同サイズ（min-width 120px・.ir-btn と同一盒）で**間隔 10px**。
+5. **全画面表示/スライドショーボタン行**の上に**余白 5px**（`.ir-fsrow { margin-top:5px }`）。
+
+### 実装
+- `room_app.js`: `slStep(dir)` 追加（slNext と共通の保有画像 ts 降順seq）。`enterFs` は seq 常時設定。viewer に `keydown`（box 切断で自動解除）。createForm に接続設定ボタン。wsForm は open 時 `draw()`。
+- `css/imgroom.css`: `.ir-fsp button`（同盒・10px 間隔）、`.ir-fsrow` 上部余白。
+
+### テスト（「SPEC OK」）
+- `fsKeyNext`/`fsKeyPrev`（全画面→/←で h3 変化・復復、ir-fs 維持）/ `slideKeyPrev`（スライドショー←で戻る）/ `confirmBtnSize`（2 ボタン同寸法・横間隔 8〜12px）/ `wsBtnCreate`（作成画面のボタン）/ `wsQrAuto`（オープン時 canvas 自動表示）。

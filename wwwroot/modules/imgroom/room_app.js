@@ -486,6 +486,9 @@ export class RoomApp {
 		const xo = Toggle({ parent: row, label: 'btn.xorig', onChange: () => {} }); // xorig=true で以後メニューから oa 管理（§6.6）
 		const go = Vw.btn(row, { class: 'ir-btn' });
 		Vw.sT(go, t('btn.create'));
+		const bw = Vw.btn(row, { class: 'ir-btn' }); // v2.5 §30: 部屋作成画面にも接続設定
+		Vw.sT(bw, '⚙️ ' + t('btn.ws'));
+		Vw.click(bw, () => this.wsForm());
 		Vw.click(go, async () => {
 			const nmRaw = nmIn.value.trim(),
 				uid = uidIn.value.trim(),
@@ -590,6 +593,7 @@ export class RoomApp {
 			Toast(t('msg.ws.set') + ' ' + getWsBase());
 			draw().catch(e => ef(e, 'room_app.wsQr'));
 		};
+		draw().catch(e => ef(e, 'room_app.wsQr0')); // v2.5 §30: QR はデフォルト表示
 		const r1 = Vw.div(box, { class: 'ir-row' });
 		const bQr = Vw.btn(r1, { class: 'ir-btn' });
 		Vw.sT(bQr, t('ws.btn.qr'));
@@ -1347,6 +1351,23 @@ export class RoomApp {
 		this._slPend = true;
 		this.viewer(nxt, b);
 	}
+	async slStep(dir) { // v2.5 §30: キー左右で次へ/戻る（全画面・スライドショー共通。ts 降順シーケンス）
+		const box = this._vBox;
+		if (!box || !box._h10 || !box._mdl || !box._mdl.isConnected) return;
+		const seq = this._slSeq || [];
+		if (seq.length < 2) return;
+		const i = (seq.indexOf(box._h10) + dir + seq.length) % seq.length,
+			nxt = seq[i];
+		if (nxt === box._h10) return;
+		const b = await this.bodyOf(nxt).catch(() => null);
+		if (!b) {
+			if (this._slOn) this.slStop();
+			return;
+		}
+		this._fsPend = true;
+		this._slPend = this._slOn === true;
+		this.viewer(nxt, b);
+	}
 	async viewer(h10, blob) {
 		// 同一画像の再クリック無視・別画像表示時は旧ビューアを閉じる（モーダル多重防止、追加仕様 v1.2）
 		if (this._vPend === h10) return;
@@ -1454,9 +1475,9 @@ export class RoomApp {
 			try {
 				if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
 			} catch (e) { /* 拒否/null 不可視はオーバーレイのみで成立 */ }
+			this._slSeq = heldSeq(); // v2.5 §30: 全画面のみでも左右キーで送れるよう seq は常時
 			if (slide) {
 				this._slOn = true;
-				this._slSeq = heldSeq();
 				this.slArm();
 			}
 		};
@@ -1465,6 +1486,20 @@ export class RoomApp {
 		Vw.click(wrap, () => {
 			if (box.classList.contains('ir-fs')) askExit(); // 全画面中の画像タップは解除確認
 		});
+		// v2.5 §30: 全画面/スライドショー中の ←/→ は戻る/次へ（確認中は無視。手動送りではタイマ再アーム）
+		const onFKey = e => {
+			if (!box.isConnected) {
+				Vw.rel(document, 'keydown', onFKey);
+				return;
+			}
+			if (!box.classList.contains('ir-fs') || box._fsc) return;
+			if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+				e.preventDefault();
+				if (this._slOn && !this._slPaused) this.slArm();
+				this.slStep(e.key === 'ArrowRight' ? 1 : -1).catch(er => ef(er, 'room_app.fsStep'));
+			}
+		};
+		Vw.ael(document, 'keydown', onFKey);
 		if (this._fsPend) {
 			const sl = this._slPend === true;
 			this._fsPend = false;

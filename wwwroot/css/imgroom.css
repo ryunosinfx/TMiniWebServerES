@@ -555,8 +555,15 @@ body {
 	border-radius: 10px;
 	text-align: center;
 }
-.ir-fsp .ir-btn {
-	margin: 8px 6px 0 0;
+.ir-fsp button {
+	/* v2.5 §30: 解除確認のボタンは同サイズ・間隔 10px（kp は class なしのため要素選択） */
+	margin: 8px 5px 0 5px;
+	min-width: 120px;
+	padding: 9px 13px; /* .ir-btn と同一の盒（続ける に class が無く高さ差が出ていた） */
+	min-height: 40px;
+}
+.ir-fsrow {
+	margin-top: 5px; /* v2.5 §30: 全画面/スライドショーボタンの上に余白 */
 }
 .ir-thumb {
 	position: relative;

@@ -435,6 +435,32 @@ ck('fsConfirmText', (await A.textContent('.ir-fsp')).includes('終了'));
 await A.click('.ir-fsp button:has-text("続ける")');
 await A.waitForTimeout(300);
 ck('fsKeepOn', (await A.locator('.ir-mbx.ir-fs').count()) === 1 && (await A.locator('.ir-fsc').count()) === 0);
+// v2.5 §30: 全画面中の ←/→ は戻る/次へ。解除確認ボタンは同サイズ・10px 間隔
+const t0k = (await A.textContent('.ir-mbx h3')).trim();
+await A.keyboard.press('ArrowRight');
+await A.waitForFunction(n => {
+	const x = document.querySelector('.ir-mbx h3');
+	return x && x.textContent.trim() !== n;
+}, t0k, { timeout: 8000 });
+ck('fsKeyNext', (await A.locator('.ir-mbx.ir-fs').count()) === 1);
+await A.keyboard.press('ArrowLeft');
+await A.waitForFunction(n => {
+	const x = document.querySelector('.ir-mbx h3');
+	return x && x.textContent.trim() === n;
+}, t0k, { timeout: 8000 });
+ck('fsKeyPrev', (await A.textContent('.ir-mbx h3')).trim() === t0k);
+await A.click('.ir-imgwrap');
+await A.waitForSelector('.ir-fsc', { timeout: 5000 });
+ck('confirmBtnSize', await A.evaluate(() => {
+	const bs = [...document.querySelectorAll('.ir-fsp button')];
+	if (bs.length !== 2) return false;
+	const a = bs[0].getBoundingClientRect(),
+		b = bs[1].getBoundingClientRect(),
+		gap = Math.min(Math.abs(b.left - a.right), Math.abs(a.left - b.right));
+	return Math.abs(a.width - b.width) <= 1 && Math.abs(a.height - b.height) <= 1 && gap >= 8 && gap <= 12;
+}));
+await A.click('.ir-fsp button:has-text("続ける")');
+await A.waitForTimeout(250);
 // 全画面解除もタップ→コンファーム（終了）
 await A.click('.ir-imgwrap');
 await A.waitForSelector('.ir-fsc', { timeout: 5000 });
@@ -451,6 +477,12 @@ await A.waitForFunction(cur => {
 }, t0s, { timeout: 9000 });
 const t1s = (await A.textContent('.ir-mbx h3')).trim();
 ck('slideAdvance', t1s !== t0s);
+await A.keyboard.press('ArrowLeft'); // v2.5 §30: スライドショー中の ← は戻る
+await A.waitForFunction(n => {
+	const x = document.querySelector('.ir-mbx h3');
+	return x && x.textContent.trim() === n;
+}, t0s, { timeout: 9000 });
+ck('slideKeyPrev', (await A.textContent('.ir-mbx h3')).trim() === t0s);
 ck('slideHeldOnly', await A.evaluate(nm => {
 	const c = window.__IRAPP.activeCtx();
 	const un = b => {
@@ -609,6 +641,12 @@ await D2.goto(BASE + '/img_room.html');
 await D2.waitForSelector('button:has-text("部屋作成")', { timeout: 15000 });
 await D2.click('button:has-text("部屋作成")');
 await D2.waitForSelector('input[name="ir-cpw"]', { timeout: 10000 });
+ck('wsBtnCreate', (await D2.locator('.ir-frm button:has-text("⚙️ 接続設定")').count()) === 1); // v2.5 §30: 作成画面にも接続設定
+await D2.click('.ir-frm button:has-text("⚙️ 接続設定")');
+await D2.waitForSelector('.ir-wsqr canvas.ir-qrimg', { timeout: 20000 }); // QR はデフォルト表示
+ck('wsQrAuto', true);
+await D2.click('.ir-mbx .ir-mclose');
+await D2.waitForTimeout(400);
 ck('pwLabel', (await D2.locator('.ir-frm label:has-text("パスワード")').count()) === 1);
 const un = await D2.inputValue('input[name="ir-cuid"]');
 ck('nameRandom', un.length > 0 && (await D2.evaluate(x => (window.__IRAPP.cfg.names || []).includes(x), un)), un);
