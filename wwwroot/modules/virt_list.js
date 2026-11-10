@@ -29,9 +29,11 @@ export class VirtList {
 		this.tl = 0; // 最終更新時刻 ms
 		this.dead = false; // destroy 済み
 		this.sc = () => this.th(); // scroll ハンドラ（removeEventListener 対応用）
+		this.ws = () => this.th(); // ページスクロール補完（v1.5 §19: 容器が高さ非拘束で箱が伸長するレイアウトでは窓が進まない）
 		this.sp = Vw.div(this.ct, { class: 'vl-spacer' }, { position: 'relative', width: '100%' });
 		// passive 指定は Vw.ael では渡せないため素の addEventListener（第三引数 capture 不一致なし）
 		if (this.ct) this.ct.addEventListener('scroll', this.sc, { passive: true });
+		window.addEventListener('scroll', this.ws, { passive: true });
 		this.refresh();
 	}
 	refresh() {
@@ -48,6 +50,7 @@ export class VirtList {
 		if (this.tm) clearTimeout(this.tm);
 		this.tm = 0;
 		if (this.ct) this.ct.removeEventListener('scroll', this.sc);
+		window.removeEventListener('scroll', this.ws);
 		for (const i of [...this.els.keys()]) this.ev(i);
 		Vw.rm(this.sp);
 		this.fnW = this.fnE = this.fnR = this.fnC = null;
@@ -80,7 +83,21 @@ export class VirtList {
 			return;
 		}
 		const mx = n - 1; // 最終ページ（アイテム総数 = ページ総数）
-		let cur = Math.floor(((this.ct && this.ct.scrollTop) || 0) / this.pg);
+		let cur;
+		const st = (this.ct && this.ct.scrollTop) || 0;
+		if (st) cur = Math.floor(st / this.pg);
+		else {
+			// v1.5 §19: 容器が高さ非拘束（spacer が箱を伸長させページ全体がスクロールする）レイアウトでは
+			// scrollTop が常に 0 で窓が進まない。箱の viewport 上位置（rect.top の負方向）から現在ページを求める
+			const r = this.ct ? this.ct.getBoundingClientRect() : null;
+			// 窓は「最初に見えるページ」を下限に、ビューポート下端のページを必ず覆う中央位置へ（下端到達で末尾ページが窓から漏れない）
+			if (r) {
+				const vh = (this.ct && this.ct.ownerDocument && this.ct.ownerDocument.documentElement.clientHeight) || 844,
+					first = Math.floor(Math.max(0, -r.top) / this.pg),
+					last = Math.floor(Math.max(0, vh - r.top) / this.pg);
+				cur = Math.max(first, last - Math.floor(this.wp / 2));
+			} else cur = 0;
+		}
 		if (cur < 0) cur = 0;
 		if (cur > mx) cur = mx;
 		const h = Math.floor(this.wp / 2); // 前側ページ数

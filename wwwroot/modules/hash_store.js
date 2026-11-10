@@ -16,9 +16,11 @@ const DEF_ROUNDS = 10, // HASH_ROUNDS (ir_const.js既定。循環import回避の
 export class HashStore {
 	constructor(cfg = {}) {
 		this.rounds = Number.isFinite(cfg.rounds) && cfg.rounds > 0 ? cfg.rounds : DEF_ROUNDS;
+		this._mmap = new Map(); // h10 -> meta（metaAll 後に全件・metaPut で増分。10 万件規模の metaGet 走査を消す）
 	}
 	static bp = h => 'bodies' + P + h; //本体パス
-	static mp = h => 'meta' + P + h + '.json'; //メタパス
+	static mp = h => 'meta' + P + h + '.json'; // legacy 1 件 1 ファイル（v1.5 で day jsonl へマイグレーション、読込のみ残置）
+	static dp = day => 'meta' + P + 'd' + day + '.jsonl'; // per-day 差分ログ（v1.5 §19: 1 日 1 ファイル・追記）
 	static chk(h) {
 		if (!RE_H.test(h)) throw new Error('HashStore: invalid h10 ' + h);
 		return h;
@@ -56,30 +58,65 @@ export class HashStore {
 	async metaPut(metaObj) {
 		await OPFS.rd;
 		const h = HashStore.chk(metaObj && metaObj.h);
-		await OPFS.w(HashStore.mp(h), Y.s2u(JSON.stringify(metaObj))); //JSON→UTF-8
+		const ts = Number.isFinite(metaObj.ts) && metaObj.ts > 0 ? metaObj.ts : Date.now();
+		// v1.5 §19: 1 件 1 行の追記（per-day jsonl）。r マージ等の更新も追記で last-wins。
+		await OPFS.ap(HashStore.dp(Math.floor(ts / DAY_MS)), Y.s2u(JSON.stringify(metaObj) + '\n'));
+		this._mmap.set(h, metaObj);
 		return h;
 	}
 	async metaGet(h10) {
 		await OPFS.rd;
-		const p = HashStore.mp(HashStore.chk(h10));
-		if (!(await OPFS.isEf(p))) return null;
-		try {
-			return JSON.parse(Y.u2s(await OPFS.r(p))); //UTF-8→文字列→JSON
-		} catch (e) {
-			return null;
-		}
+		const h = HashStore.chk(h10);
+		if (this._mmap.has(h)) return this._mmap.get(h);
+		await this.metaAll(); // 未ロード時は day files 一括読込（legacy 1 件 1 ファイル走査を廃止）
+		return this._mmap.get(h) || null;
 	}
 	async metaAll() {
 		await OPFS.rd;
-		const l = await OPFS.ls('meta'),
-			out = [];
+		const out = new Map(); // h10 -> meta（day jsonl を時系列 reduce、del で除去）
+		const l = await OPFS.ls('meta');
 		for (const e of l) {
-			if (!HashStore.isf(e)) continue;
+			if (!HashStore.isf(e) || !/^d\d+\.jsonl$/.test(e.k)) continue;
 			try {
-				out.push(JSON.parse(Y.u2s(await OPFS.r(HashStore.fp(e)))));
-			} catch (err) {} //破損メタは読み飛ばす
+				for (const line of Y.u2s(await OPFS.r(HashStore.fp(e))).split('\n')) {
+					if (!line) continue;
+					let m;
+					try {
+						m = JSON.parse(line);
+					} catch (err) {
+						continue; // 破損行は読み飛ばす
+					}
+					if (!m || !RE_H.test(m.h)) continue;
+					if (m.del) out.delete(m.h);
+					else out.set(m.h, m);
+				}
+			} catch (err) {} // 日ファイル自体の読込失敗はスキップ
 		}
-		return out;
+		// legacy meta/<h>.json → day jsonl へのマイグレーション（初回のみ。以後の起動は day のみで高速）
+		const byDay = new Map();
+		for (const e of l) {
+			if (!HashStore.isf(e) || /\.jsonl$/.test(e.k) || !/\.json$/.test(e.k)) continue;
+			if (!RE_H.test(e.k.slice(0, -5))) continue;
+			let m;
+			try {
+				m = JSON.parse(Y.u2s(await OPFS.r(HashStore.fp(e))));
+			} catch (err) {
+				await OPFS.rmf(HashStore.fp(e)); // 破損 legacy は除去
+				continue;
+			}
+			await OPFS.rmf(HashStore.fp(e));
+			if (!m || !RE_H.test(m.h) || out.has(m.h)) continue; // day 側に既にあれば legacy は廃止のみ
+			out.set(m.h, m);
+			const day = Math.floor((Number.isFinite(m.ts) && m.ts > 0 ? m.ts : Date.now()) / DAY_MS);
+			if (!byDay.has(day)) byDay.set(day, []);
+			byDay.get(day).push(m);
+		}
+		for (const [day, ms] of byDay) {
+			// 既存 day ファイルがあれば追記（w の全書換で既存行を消さない）
+			await OPFS.ap(HashStore.dp(day), Y.s2u(ms.map(m => JSON.stringify(m)).join('\n') + '\n'));
+		}
+		this._mmap = out;
+		return [...out.values()];
 	}
 
 	async listTrash(nowMs, keepDays) {
@@ -97,11 +134,33 @@ export class HashStore {
 			kd = Number.isFinite(keepDays) && keepDays > 0 ? keepDays : DEF_KEEP_DAYS,
 			cut = now - kd * DAY_MS, // now - d > kd日 ⇔ d < cut
 			ms = await this.metaAll(),
-			kept = new Set();
+			kept = new Set(),
+			dirtyDays = new Set(),
+			dropHs = new Set(); // 期限切れで物理削除する h（同一 h の全行を day から除去する）
 		for (const m of ms) {
 			if (!m || !RE_H.test(m.h)) continue;
-			if (m.d && m.d < cut) await OPFS.rmf(HashStore.mp(m.h)); //期限切れ meta 物理削除
-			else kept.add(m.h); //論理削除中(d 設定済み・未経過)も参照有効(§9.8)
+			if (m.d && m.d < cut) {
+				// 期限切れ meta 物理削除（v1.5: day ファイルから当該 h の全行を除去して書換。1 件 1 ファイル rmf ではない）
+				dropHs.add(m.h);
+				dirtyDays.add(Math.floor((Number.isFinite(m.ts) ? m.ts : m.d) / DAY_MS));
+				this._mmap.delete(m.h);
+			} else kept.add(m.h); //論理削除中(d 設定済み・未経過)も参照有効(§9.8)
+		}
+		for (const day of dirtyDays) {
+			const p = HashStore.dp(day);
+			if (!(await OPFS.isEf(p))) continue;
+			const keep = [];
+			for (const line of Y.u2s(await OPFS.r(p)).split('\n')) {
+				if (!line) continue;
+				let m;
+				try {
+					m = JSON.parse(line);
+				} catch (err) {
+					continue;
+				}
+				if (m && RE_H.test(m.h) && !dropHs.has(m.h)) keep.push(line);
+			}
+			await OPFS.w(p, Y.s2u(keep.length ? keep.join('\n') + '\n' : ''));
 		}
 		for (const h of extraRefs || []) if (RE_H.test(h)) kept.add(h); //部屋 manifest/autodl 等の外部参照
 		const deleted = [];
@@ -115,19 +174,19 @@ export class HashStore {
 
 	async sizesOf(h10s) {
 		await OPFS.rd;
-		// bodies+meta 実測。ls は平坦配列なので p 一致で絞り、s を map 参照
-		const bs = new Map(),
-			ms = new Map();
+		// bodies 実測 + meta は day jsonl 平均（v1.5: 1 件 1 ファイルでないため 1 件あたり=総bytes/件数の概算。表示用途で粗さ許容）
+		const bs = new Map();
+		let metaBytes = 0;
 		for (const e of await OPFS.ls('bodies')) if (HashStore.isf(e)) bs.set(e.k, e.s);
-		for (const e of await OPFS.ls('meta')) if (HashStore.isf(e)) ms.set(e.k, e.s);
+		for (const e of await OPFS.ls('meta')) if (HashStore.isf(e)) metaBytes += e.s;
+		const mAvg = Math.ceil(metaBytes / Math.max(1, this._mmap.size));
 		let bytes = 0,
 			count = 0;
 		for (const h of h10s || []) {
 			if (!RE_H.test(h)) continue;
-			const b = bs.get(h),
-				m = ms.get(h + '.json');
-			if (b === undefined && m === undefined) continue;
-			bytes += (b || 0) + (m || 0);
+			const b = bs.get(h);
+			if (b === undefined && !this._mmap.has(h)) continue;
+			bytes += (b || 0) + mAvg;
 			count++;
 		}
 		return { bytes, count };

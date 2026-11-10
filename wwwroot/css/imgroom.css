@@ -1,0 +1,597 @@
+/**
+ * ImageRoom スタイルシート（テーマ変数で配色を差し替え可能）。
+ * JS 側はクラス名のみで切り分け、寸法等の設定値は CSS 変数（--ir-thumb 等）で注入する。
+ * 上書き例: <link> の後に別テーマ CSS を読み込む、または :root を上書きする。
+ */
+:root {
+	--ir-bg: #181c22;
+	--ir-fg: #e8ecf2;
+	--ir-line: #2c333d;
+	--ir-card: #20262e;
+	--ir-btn: #242b34;
+	--ir-in: #11151a;
+	--ir-accent: #3d7dd8;
+	--ir-accent-soft: #23435f;
+	--ir-on: #2b6b3a;
+	--ir-warn: #6a2b2b;
+	--ir-bdg: #31415a;
+	--ir-off: #5b2f2f;
+	--ir-mut: #9aa6b2;
+	--ir-sec: #2e2410;
+	--ir-sec-bd: #b8860b;
+	--ir-mbx: #1d232b;
+	--ir-mdl: rgba(0, 0, 0, 0.62);
+	--ir-thumb: 96px; /* 設定 THUMB_PX を JS が setProperty で注入 */
+}
+body {
+	margin: 0;
+	background: var(--ir-bg);
+	color: var(--ir-fg);
+	font: 14px/1.5 system-ui, sans-serif;
+}
+/* ---- ヘッダー / タブ ---- */
+.ir-hd {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--ir-line);
+}
+.ir-hd b {
+	font-size: 15px;
+}
+.ir-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 6px 10px;
+	border-bottom: 1px solid var(--ir-line);
+}
+.ir-tab {
+	display: inline-flex;
+	gap: 6px;
+	align-items: center;
+	padding: 9px 12px;
+	border: 1px solid var(--ir-line);
+	border-radius: 8px;
+	background: var(--ir-card);
+	color: var(--ir-fg);
+	font: inherit;
+	min-height: 40px;
+}
+.ir-tab.on {
+	background: var(--ir-accent);
+	border-color: var(--ir-accent);
+}
+/* ---- 部屋ビュー内サブタブ（画像 / URL QR / パスワード QR・作成者のみ） ---- */
+.ir-subtabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin: 8px 0;
+}
+.ir-subtab {
+	padding: 8px 12px;
+	border: 1px solid var(--ir-line);
+	border-radius: 8px;
+	background: var(--ir-card);
+	color: var(--ir-fg);
+	font: inherit;
+	min-height: 40px;
+}
+.ir-subtab.on {
+	background: var(--ir-accent);
+	border-color: var(--ir-accent);
+}
+/* ---- 参加者バッジ列（部屋名下・参加時刻昇順） ---- */
+.ir-parts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	align-items: center;
+	padding: 6px 0;
+}
+.ir-parts-lbl {
+	color: var(--ir-mut);
+	font-size: 12px;
+}
+.ir-pbadge {
+	display: inline-flex;
+	gap: 6px;
+	align-items: center;
+	padding: 4px 10px;
+	border: 1px solid var(--ir-line);
+	border-radius: 14px;
+	background: var(--ir-card);
+	font-size: 13px;
+}
+.ir-pbadge.me {
+	border-color: var(--ir-accent);
+	background: var(--ir-accent-soft);
+}
+.ir-ps {
+	/* サーバーモード参加者の S マーク */
+	display: inline-block;
+	padding: 1px 6px;
+	border-radius: 9px;
+	background: var(--ir-accent);
+	color: #fff;
+	font-size: 11px;
+	font-weight: 700;
+}
+/* ---- ボタン / フォーム ---- */
+.ir-btn {
+	padding: 9px 13px;
+	border: 1px solid var(--ir-line);
+	border-radius: 8px;
+	background: var(--ir-btn);
+	color: var(--ir-fg);
+	font: inherit;
+	min-height: 40px;
+}
+.ir-btn.warn {
+	background: var(--ir-warn);
+}
+.ir-btn.on {
+	background: var(--ir-on);
+}
+.ir-main {
+	padding: 10px 10px 64px; /* 下は左下固定バー（v2.1 §25）に重ねない */
+	max-width: 1100px;
+	margin: 0 auto;
+}
+.ir-frm {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	max-width: 560px;
+}
+.ir-frm label {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	color: var(--ir-mut);
+}
+.ir-frm input,
+.ir-frm select,
+.ir-frm textarea {
+	padding: 10px;
+	border: 1px solid var(--ir-line);
+	border-radius: 8px;
+	background: var(--ir-in);
+	color: var(--ir-fg);
+	font: inherit;
+	min-height: 42px;
+}
+.ir-langs {
+	padding: 8px;
+	background: var(--ir-in);
+	color: var(--ir-fg);
+	border: 1px solid var(--ir-line);
+	border-radius: 8px;
+	min-height: 40px;
+}
+.ir-file {
+	min-height: 44px;
+}
+.ir-crd {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	padding: 10px;
+	border: 1px solid var(--ir-line);
+	border-radius: 10px;
+	margin-bottom: 8px;
+}
+.ir-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+.ir-botrow {
+	/* v2.0 §24: 下部のサムネサイズ行（行高は文字サイズギリギリ、行間 1px） */
+	gap: 4px;
+	margin: 1px 0 0;
+	line-height: 1.15;
+}
+.ir-botrow .ir-btn {
+	padding: 1px 8px;
+	min-height: 0; /* v2.0 §24: 既定 40px タップ目標を上書き（行高ギリギリ要求） */
+}
+.ir-botrow .ir-mut {
+	margin: 0 2px;
+}
+.ir-bdg {
+	display: inline-block;
+	padding: 2px 7px;
+	border-radius: 9px;
+	font-size: 12px;
+	background: var(--ir-bdg);
+}
+.ir-bdgon {
+	display: inline-block;
+	padding: 2px 7px;
+	border-radius: 9px;
+	font-size: 12px;
+	background: var(--ir-on);
+}
+.ir-bdgoff {
+	display: inline-block;
+	padding: 2px 7px;
+	border-radius: 9px;
+	font-size: 12px;
+	background: var(--ir-off);
+}
+.ir-sec {
+	margin: 10px 0;
+	padding: 8px 10px;
+	border: 1px solid var(--ir-line);
+	border-radius: 10px;
+}
+.ir-sec h4 {
+	margin: 2px 0 6px;
+	font-size: 13px;
+	color: var(--ir-mut);
+}
+.ir-mut {
+	color: var(--ir-mut);
+	font-size: 12px;
+}
+.ir-rd {
+	display: inline-flex;
+	gap: 4px;
+	align-items: center;
+	padding: 8px 10px;
+	border: 1px solid var(--ir-line);
+	border-radius: 8px;
+	min-height: 40px;
+}
+/* ---- モーダル（☓ 閉じるは右上） ---- */
+.ir-mdl {
+	position: fixed;
+	inset: 0;
+	background: var(--ir-mdl);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 99;
+	padding: 10px;
+}
+.ir-mbx {
+	position: relative;
+	background: var(--ir-mbx);
+	border: 1px solid var(--ir-line);
+	border-radius: 12px;
+	padding: 12px;
+	max-width: min(680px, 100%);
+	max-height: 92%;
+	overflow: auto;
+	width: 100%;
+}
+.ir-mhd {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+.ir-mhd h3 {
+	margin: 0;
+	flex: 1;
+	word-break: break-all;
+}
+.ir-mclose {
+	border: none;
+	background: transparent;
+	color: var(--ir-mut);
+	font-size: 20px;
+	line-height: 1;
+	min-width: 38px;
+	min-height: 38px;
+	cursor: pointer;
+}
+.ir-mclose:hover {
+	color: var(--ir-fg);
+}
+.ir-mbtns {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin-top: 8px;
+}
+.ir-trright {
+	margin-left: auto; /* ゴミ箱ボタンを右端へ */
+}
+/* ---- ビューア画像（表示幅 ⇄ ネイティブサイズ） ---- */
+.ir-imgwrap {
+	overflow: auto;
+	max-height: 70vh;
+	border: 1px solid var(--ir-line);
+	border-radius: 8px;
+	margin: 6px 0;
+}
+.ir-imgwrap.fit img {
+	max-width: 100%;
+	max-height: 70vh;
+	display: block;
+}
+.ir-imgwrap.native img {
+	max-width: none;
+	max-height: none; /* .ir-img の 60vh 制限を上書き（ネイティブ = 実寸） */
+	display: block;
+}
+.ir-imgwrap.zoom img {
+	max-width: none;
+	max-height: none; /* 倍率指定は実寸基準（width は JS のインライン指定） */
+	display: block;
+}
+.ir-img {
+	max-width: 100%;
+	max-height: 60vh;
+	display: block;
+	margin: 6px 0;
+}
+/* ---- QR ---- */
+.ir-qrimg {
+	max-width: 100%;
+	background: #fff;
+	border-radius: 4px;
+}
+.ir-qrbox {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: center;
+	margin: 8px 0;
+	padding: 8px 10px;
+	border: 1px dashed var(--ir-line);
+	border-radius: 10px;
+}
+.ir-qrurl {
+	word-break: break-all;
+	font-size: 12px;
+}
+/* ---- QR パネル（v1.2: 画像とボタン/説明を横並び、パスワード QR は秘密扱い）---- */
+.ir-qrrow {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: flex-start;
+	margin: 8px 0;
+	padding: 8px 10px;
+	border: 1px dashed var(--ir-line);
+	border-radius: 10px;
+}
+.ir-qrpic {
+	flex: 0 0 auto;
+	display: flex;
+}
+.ir-qrside {
+	flex: 1 1 240px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 220px;
+}
+.ir-qrnote {
+	color: var(--ir-mut);
+	font-size: 12px;
+	line-height: 1.5;
+}
+.ir-qrrow.ir-secret {
+	border: 2px solid var(--ir-sec-bd);
+	background: var(--ir-sec);
+}
+.ir-secret .ir-qrimg {
+	outline: 3px solid var(--ir-sec-bd);
+}
+/* ---- ビューア（v1.2: メタ3行・ズーム段）---- */
+.ir-meta3 {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 8px 0;
+}
+.ir-meta3 .ir-row {
+	gap: 10px;
+}
+.ir-sep {
+	color: var(--ir-line);
+}
+.ir-sha {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 11px;
+	word-break: break-all;
+}
+/* ---- カレンダー ---- */
+.ir-roomcal {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+.ir-ctrlbar {
+	/* v2.1 §25: 日週月タブ+サムネサイズ行は画面左下に固定（モバイルでも常時表示）。モーダル(z99)には重ならない */
+	position: fixed;
+	left: 6px;
+	bottom: 6px;
+	z-index: 40;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 1px;
+	background: var(--ir-bg);
+	border-radius: 8px;
+	padding: 3px 6px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.ir-ctrlbar .ir-calbar {
+	margin: 0;
+}
+.ir-calbar {
+	/* v2.0 §24: 日/週/月は下部タブ（サムネの後）。行高は文字サイズギリギリ、行間 1px */
+	display: flex;
+	gap: 4px;
+	padding: 0 2px;
+	margin: 1px 0 0;
+	line-height: 1.15;
+	align-items: center;
+}
+.ir-calmode {
+	padding: 1px 8px;
+	border: 1px solid var(--ir-line);
+	border-radius: 8px;
+	background: var(--ir-btn);
+	color: var(--ir-fg);
+	font: inherit;
+	min-height: 0; /* v2.0 §24: 行高は文字サイズギリギリ */
+}
+.ir-calmode.on {
+	font-weight: 700;
+	background: var(--ir-accent);
+	border-color: var(--ir-accent);
+}
+.ir-calbox {
+	flex: 1;
+	min-height: 0;
+}
+.cal-ch {
+	/* v1.8 §22: ヘッダのみで区切る（枠線なし）。日付文字と背景のコントラストを上げる（fg on bg） */
+	position: sticky;
+	top: 0;
+	background: var(--ir-bg);
+	color: var(--ir-fg);
+	font-weight: 700;
+	z-index: 1;
+}
+.ir-mbx.ir-fs {
+	/* 全画面表示（v1.8 §22）。解除は画像タップ → コンファームでのみ確認 */
+	position: fixed;
+	inset: 0;
+	width: 100vw;
+	height: 100vh;
+	max-width: none;
+	max-height: none;
+	border-radius: 0;
+	background: #000;
+	overflow: hidden;
+}
+.ir-fs > :not(.ir-imgwrap):not(.ir-fsc) {
+	display: none; /* v1.9 §23: 全画面/slideshow は画像のみ（解除はタップ→コンファームのみ） */
+}
+.ir-fs .ir-imgwrap {
+	flex: 1;
+	min-height: 0;
+}
+.ir-fs .ir-imgwrap.fit img {
+	max-height: 100%;
+}
+.ir-fsc {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, 0.62);
+	z-index: 6;
+}
+.ir-fsp {
+	background: var(--ir-mbx);
+	padding: 16px 20px;
+	border-radius: 10px;
+	text-align: center;
+}
+.ir-fsp .ir-btn {
+	margin: 8px 6px 0 0;
+}
+.ir-thumb {
+	position: relative;
+	width: var(--ir-thumb);
+	height: var(--ir-thumb);
+	margin: 2px 4px 2px 0; /* v1.8 §22: 左寄せ（v1.6 中央寄せから変更）。フレームボーダー廃止 */
+	overflow: hidden;
+	box-sizing: border-box;
+	border-radius: 2px;
+	cursor: pointer;
+	background: var(--ir-card);
+}
+.ir-thumb img {
+	width: 100%;
+	height: 100%;
+	object-fit: contain; /* v1.6 §20: 全体表示＋枠内中央（旧 cover は旧様式サム用。新様式は正方形のため差なし） */
+	display: block;
+}
+.ir-gray {
+	filter: grayscale(1);
+}
+.ir-graybadge {
+	position: absolute;
+	left: 2px;
+	top: 2px;
+	max-width: 92%;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-size: 10px;
+}
+.ir-progbar {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	padding: 0 2px 2px;
+}
+/* ---- 一覧行 / 共有ウィジェット ---- */
+.ir-tr {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	align-items: center;
+	gap: 8px;
+	border-bottom: 1px solid var(--ir-line);
+	padding: 8px 0;
+}
+.ir-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+.ir-prog-wrap {
+	height: 10px;
+	background: var(--ir-line);
+	border-radius: 5px;
+	overflow: hidden;
+}
+.ir-prog-bar {
+	height: 100%;
+	width: 0%;
+	background: var(--ir-accent);
+}
+.ir-prog-cap {
+	font-size: 12px;
+}
+.ir-badge {
+	display: inline-block;
+	padding: 1px 6px;
+	border-radius: 8px;
+	background: var(--ir-bdg);
+	color: var(--ir-fg);
+	font-size: 12px;
+}
+.ir-badge-off {
+	background: var(--ir-off);
+}
+.ir-toast {
+	position: fixed;
+	left: 50%;
+	bottom: 16px;
+	transform: translateX(-50%);
+	background: #222;
+	color: #fff;
+	padding: 8px 14px;
+	border-radius: 6px;
+	max-width: 90vw;
+	z-index: 9999;
+}

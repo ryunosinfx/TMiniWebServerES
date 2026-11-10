@@ -39,8 +39,12 @@ const Chat = {
 	dl: [],
 	csl: [],
 	leaveRoom: async (roomId, userId, socket) => {
-		const uL = Chat.getRoomUserList(roomId);
-		await Chat.filterUserList(uL, userId, Chat.isNotSame);
+		const uL = Chat.getRoomUserList(roomId),
+			now = Date.now();
+		// socket 実体一致で削除: 旧接続の close イベント遅延到達が、同一 userId で再 ENTER 済み
+		// の新セッション条目を退室させる取り違えを防止（cmd L / onClose とも自接続の条目のみ削除）。
+		// ついでに期限切れ条目も sweep する。
+		for (let i = uL.length - 1; i >= 0; i--) if (uL[i].socket === socket || uL[i].expire <= now) uL.splice(i, 1);
 		D(`leaveRoom roomId:${roomId} /userId:${userId}`);
 		// closingSocketsList は未定義のまま push され、切断時にプロセス全体を crash させていたため即時 close に変更。
 		// （TMiniWebSocket.close() は内部で例外を握り、既に closed なら no-op のため安全）

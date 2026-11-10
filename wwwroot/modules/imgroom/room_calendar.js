@@ -59,8 +59,9 @@ export class RoomCalendar {
 			if (typeof this._prevProg === 'function') this._prevProg(h10, n, m);
 		};
 
-		this.root = Vw.div(parent, { class: 'ir-roomcal' }, { display: 'flex', 'flex-direction': 'column', height: '100%' });
-		this.bar = Vw.div(this.root, { class: 'ir-calbar' }, { display: 'flex', gap: '6px', padding: '4px 2px', 'align-items': 'center' });
+		this.root = Vw.div(parent, { class: 'ir-roomcal' });
+		this._tpx = this.cfg.THUMB_PX; // v1.6 §20: 表示サイズ（setThumbPx で変更可）
+		this.bar = Vw.div(this.root, { class: 'ir-calbar' });
 		this._modeBtns = new Map();
 		for (const m of MODES) {
 			const b = Vw.btn(this.bar, { class: 'ir-calmode', type: 'button' });
@@ -68,7 +69,7 @@ export class RoomCalendar {
 			Vw.click(b, () => this.setMode(m));
 			this._modeBtns.set(m, b);
 		}
-		this.calBox = Vw.div(this.root, { class: 'ir-calbox' }, { flex: '1', 'min-height': '0' });
+		this.calBox = Vw.div(this.root, { class: 'ir-calbox' });
 		this.mkCal();
 		// 言語切替（I18N.onChange は RoomApp 等の所有者。グローバル上書きせず
 		// 再ラベル+refresh は呼び出し側から refresh()/再構築で反映してもらう）
@@ -82,6 +83,10 @@ export class RoomCalendar {
 			items: this.view(),
 			winPages: this.cfg.CAL_WINDOW_PAGES,
 			cellPx: this.cfg.THUMB_PX + 24,
+			cellCap: this.cfg.CELL_CAP, // v1.5 §19: セル/日表示上限（超大規模で DOM 定数化）
+			moreText: n => I18N.t('lbl.cal.more', { n }),
+			onExpand: () => this.schedulePass(),
+			onScroll: () => this.schedulePass(), // v1.6 §20: 月セル/日リストの内部スクロールでも実体化
 			renderItem: it => this.renderItem(it),
 			onPage: () => { this.bindScroll(); this.schedulePass(); },
 		});
@@ -115,8 +120,26 @@ export class RoomCalendar {
 	setMode(m) {
 		if (this.dead || !MODES.includes(m)) return;
 		this.md = m;
-		for (const [k, b] of this._modeBtns) Vw.sA(b, 'font-weight', k === m ? 'bold' : '');
+		for (const [k, b] of this._modeBtns) Vw.tC(b, 'on', k === m); // .ir-calmode.on（CSS）
 		if (this.cal) this.cal.setMode(m);
+		this.bindScroll();
+		this.schedulePass();
+	}
+
+	setThumbPx(v) {
+		// v1.6 §20: 表示サムネイルサイズ切替。CalView を cellPx 込みで再構築（シート/交換基準 128 は不変、CSS 変数で縮小表示）
+		if (this.dead || !(v > 0) || v === this._tpx) {
+			this._tpx = v;
+			return;
+		}
+		this._tpx = v;
+		this.cfg.THUMB_PX = v;
+		if (this.cal) {
+			this.cal.destroy();
+			this.cal = null;
+		}
+		this.mounts.clear(); // 旧ページ DOM は除去済（スライス cache は h10 単位で保持、buildThumb が再利用）
+		this.mkCal();
 		this.bindScroll();
 		this.schedulePass();
 	}
@@ -133,6 +156,7 @@ export class RoomCalendar {
 		this.dead = true;
 		if (this._pt) { clearTimeout(this._pt); this._pt = 0; }
 		if (this._bx && this._sf) this._bx.removeEventListener('scroll', this._sf);
+		if (this._sf) window.removeEventListener('scroll', this._sf);
 		this._bx = null; this._sf = null;
 		if (this.tr) {
 			for (const h10 of this.fetches.keys()) { try { this.tr.cancel(h10); } catch (e) { /* 済完了分は無視 */ } }
@@ -157,6 +181,8 @@ export class RoomCalendar {
 		this._bx = box;
 		this._sf = () => this.schedulePass();
 		box.addEventListener('scroll', this._sf, { passive: true });
+		// v1.5 §19: 箱高さ非拘束レイアウト（ページ自体がスクロール）でも窓実体化を追従させる
+		window.addEventListener('scroll', this._sf, { passive: true });
 	}
 
 	schedulePass() {
@@ -183,11 +209,7 @@ export class RoomCalendar {
 	renderItem(it) {
 		// CalView のページ窓内項目のみ呼ばれる。placeholder div（THUMB_PX 高）を返し、
 		// winPass が可視項目だけ img を実体化する。
-		const px = this.cfg.THUMB_PX;
-		const el = Vw.div(null, { class: 'ir-thumb', 'data-h10': it.h10 }, {
-			position: 'relative', width: `${px}px`, height: `${px}px`, margin: '2px',
-			overflow: 'hidden', 'box-sizing': 'border-box', border: '1px solid #ccc', 'border-radius': '3px',
-		});
+		const el = Vw.div(null, { class: 'ir-thumb', 'data-h10': it.h10 }); // 寸法は --ir-thumb（room_app が設定値から注入）
 		el._irc = { it, key: null, img: null, prog: null, badge: null, built: false };
 		this.mounts.set(++this.seq, el);
 		this.paintGray(el);
@@ -228,7 +250,7 @@ export class RoomCalendar {
 			if (!this.img || typeof this.img.bodyOf !== 'function') return;
 			const body = await this.img.bodyOf(r.it.h10);
 			if (this.dead || !r.built || !el.isConnected) return;
-			const tb = body && await ImgProc.thumb(body, this.cfg.THUMB_PX);
+			const tb = body && await ImgProc.thumb(body, this.cfg.THUMB_BASE_PX || 128); // v1.6 §20: 基準 128 で生成し表示は --ir-thumb で縮小
 			if (this.dead || !r.built || !el.isConnected || !tb) return;
 			const key = `irb:${r.it.h10}`;
 			this.wanted.add(key);
@@ -240,9 +262,7 @@ export class RoomCalendar {
 		const r = el._irc;
 		r.key = key;
 		if (r.img) r.img.setAttribute('src', url);
-		else r.img = Vw.add(el, 'img', { src: url, alt: '' }, {
-			width: '100%', height: '100%', 'object-fit': 'cover', display: 'block',
-		});
+		else r.img = Vw.add(el, 'img', { src: url, alt: '' }); // 寸法は .ir-thumb img
 	}
 
 	releaseThumb(el) {
@@ -258,17 +278,11 @@ export class RoomCalendar {
 	paintGray(el) {
 		const r = el._irc;
 		if (r.badge) { Vw.rm(r.badge); r.badge = null; }
-		Vw.sA(el, 'filter', '');
-		el.classList.remove(GRAY_CLS);
+		el.classList.remove(GRAY_CLS); // filter: grayscale は .ir-gray（CSS）
 		const ho = this.col && typeof this.col.holdersOf === 'function' ? this.col.holdersOf(r.it.h10) : null;
 		if (ho && ho.allDeparted) {
 			el.classList.add(GRAY_CLS);
-			Vw.sA(el, 'filter', 'grayscale(1)');
-			r.badge = Badge(el, 'ir-badge-off', I18N.t('msg.offline.gray'));
-			Vw.sS(r.badge, {
-				position: 'absolute', left: '2px', top: '2px', 'max-width': '92%',
-				'white-space': 'nowrap', overflow: 'hidden', 'text-overflow': 'ellipsis', 'font-size': '10px',
-			});
+			r.badge = Badge(el, 'ir-badge-off ir-graybadge', I18N.t('msg.offline.gray'));
 		}
 	}
 
@@ -299,7 +313,7 @@ export class RoomCalendar {
 		el.classList.add(PROG_CLS); // data-h10 は renderItem 生成時 att
 		if (!r.prog) {
 			r.prog = Progress({ parent: el });
-			Vw.sS(r.prog.el, { position: 'absolute', left: '0', right: '0', bottom: '0', padding: '0 2px 2px' });
+			Vw.aC(r.prog.el, 'ir-progbar');
 		}
 		r.prog.set(ratio);
 	}
@@ -312,6 +326,13 @@ export class RoomCalendar {
 			if (ho && ho.allDeparted) { // 全保持者不参加: 取得不能（§5.5/§12）
 				if (!this.dead) Toast(I18N.t('msg.offline.gray'));
 				return null;
+			}
+			// v1.3.1 perf: 自タブの自宛エコーは session で無視されるため自画像の P2P 取得は永久に
+			// REQ_TIMEOUT（作成者が自分の画像を開けないバグ）。自が保持者はローカル store から直接返す
+			// （r マージ等で本体未保持なら null → 下の transfer 経路へフォールバック）。低スペック機でも即時。
+			if (ho && ho.uids && this.col && ho.uids.includes(this.col.uid) && this.img && typeof this.img.bodyOf === 'function') {
+				const b0 = await this.img.bodyOf(h10);
+				if (b0) return b0;
 			}
 			if (!this.tr || typeof this.tr.fetch !== 'function') {
 				if (!this.dead) Toast(I18N.t('msg.fetch.fail'));

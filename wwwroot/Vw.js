@@ -58,9 +58,11 @@ export class Vw {
 	static ael = (e, ev, cb) => (e.addEventListener(ev, cb) ? cb : cb);
 	static rel = (e, ev, cb) => (e.removeEventListener(ev, cb) ? cb : cb);
 	static sT = (e, msg) => (msg ? (e.textContent = msg) : e.textContent);
-	static aC = (e, cN) => e.classList.add(cN);
-	static rC = (e, cN) => e.classList.remove(cN);
-	static tC = (e, cN) => e.classList.toggle(cN);
+	static aC = (e, cN) => e.classList.add(...String(cN).split(/\s+/).filter(Boolean));
+	static rC = (e, cN) => e.classList.remove(...String(cN).split(/\s+/).filter(Boolean));
+	// force 指定で add/remove（省略時はトグル）。第3引数は歴史的に無視されていたが、
+	// 選択状態クラス(.on)等で force 语义が期待されていたため正式対応。
+	static tC = (e, cN, force) => (force === undefined ? e.classList.toggle(cN) : e.classList.toggle(cN, !!force));
 	static sa = (e, att) => Object.keys(att).map(k => e.setAttribute(`${AttrMap[k] || k}`, att[k]));
 	static gB = () => Vw.d.getElementsByTagName('body')[0];
 	static gT = (p, T) => p.getElementsByTagName(T)[0];

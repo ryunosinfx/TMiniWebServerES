@@ -136,7 +136,7 @@ export class RoomSession {
 	}
 	_snap() {
 		// オーナー: BC へ状態スナップショット配信（§9.12 ミラーはこれで描画）
-		if (this._owner) this._bcPost({ t: 'snap', s: { online: this._st.online, authed: this._st.authed, participants: this._st.participants.map(x => ({ uid: x.uid, t: x.t })), mode: this._st.mode } });
+		if (this._owner) this._bcPost({ t: 'snap', s: { online: this._st.online, authed: this._st.authed, participants: this._st.participants.map(x => ({ uid: x.uid, t: x.t, md: x.md })), mode: this._st.mode } });
 	}
 	_applySnap(sn) {
 		if (this._owner || !sn) return;
@@ -151,7 +151,7 @@ export class RoomSession {
 			this._mirrorAnnounced = T;
 			this._emit('mirror', N); // このタブがミラーであることの初回通知（契約イベント）
 		}
-		this._st.participants = (sn.participants || []).map(x => ({ uid: x.uid, t: x.t }));
+		this._st.participants = (sn.participants || []).map(x => ({ uid: x.uid, t: x.t, md: x.md }));
 		if (prevOn !== this._st.online) this._emit(this._st.online ? 'open' : 'close', N);
 		if (!prevAuth && this._st.authed) this._emit('authOk', N);
 		this._emit('participants', this._st.participants);
@@ -176,6 +176,7 @@ export class RoomSession {
 		}
 	}
 	_onBC(m) {
+		if (this._dead) return; // v1.3.1: dispose 後の幽霊発火防止
 		if (!m || typeof m !== 'object') return;
 		switch (m.t) {
 			case 'snap':
@@ -376,11 +377,13 @@ export class RoomSession {
 		// seed の決定優先度: 引数 seed > 平文 password からの再計算 > room.json 保管値（再参加、§6.2/§6.7）
 		let s = seed || N,
 			sl = salt || N;
-		if (!sl) sl = m === 'server' ? (s ? AuthChallenge.saltServer() : this._pwSalt || AuthChallenge.saltServer()) : AuthChallenge.saltNormal();
+		// 修正: seed の塩は常に月塩（保管 seed と検証側 seed を一致させる）。server モードの日付塩は採決 W/at の使い捨て塩のみ（§6.8）
+		if (!sl) sl = m === 'server' ? AuthChallenge.saltServer() : AuthChallenge.saltNormal();
 		if (m === 'server' && !/^\d{8}$/.test(sl)) sl = AuthChallenge.saltServer();
+		const sSalt = m === 'server' ? AuthChallenge.saltNormal() : sl;
 		if (!s) {
-			if (password) s = await this._seedOf(password, sl);
-			else if (this._pw && this._pwSalt === sl) s = this._pw; // 自動再参加は保管 seed（§9.12）
+			if (password) s = await this._seedOf(password, sSalt);
+			else if (this._pw && this._pwSalt === sSalt) s = this._pw; // 自動再参加は保管 seed（§9.12）
 			else return this._fail('msg.auth.fail');
 		}
 		this._mode = m;
@@ -472,7 +475,7 @@ export class RoomSession {
 	// 採決全 OK → authOk: J broadcast + room.json 更新（pw=seed/pwSalt=salt、§6.7 更新保存）+ roomLogin 保存（§9.12）
 	async _authOk(seed, salt, mode) {
 		this._pw = seed;
-		this._pwSalt = salt;
+		this._pwSalt = /^\d{8}$/.test(salt) ? AuthChallenge.saltNormal() : salt; // 保管 pw の seed 塩は常に月塩（server 日付塩は採決のみ）
 		this.mode = mode;
 		this._st.mode = mode;
 		this._st.authed = T;
@@ -484,8 +487,8 @@ export class RoomSession {
 		await this._setRoomLogin({ uid: this.uid, mode, ts: Date.now(), gen: this.jGen });
 		this._histTouch(this.uid, T);
 		const cfg = (this.settings && this.settings.cfg) || {};
-		this.sendFrame(Protocol.mk('J', { uid: this.uid, gen: this.jGen, grid: [cfg.GRID_COLS || 4, cfg.GRID_ROWS || 8] }));
-		this._touchParticipant(this.uid);
+		this.sendFrame(Protocol.mk('J', { uid: this.uid, gen: this.jGen, grid: [cfg.GRID_COLS || 4, cfg.GRID_ROWS || 8], md: this.mode }));
+		this._touchParticipant(this.uid, Date.now(), this.mode);
 		this._armMonth();
 		this._emit('authOk', N);
 		this._snap();
@@ -579,6 +582,36 @@ export class RoomSession {
 			this._yieldLock && this._yieldLock(); // run の fn を settle させ権を明釈する（release と二重でも安全）
 		}
 	}
+	// 完全破棄（leave() 後に呼ぶ前提、v1.3.1 中間チェック C1）。BroadcastChannel・イベント購読・
+	// transfer 参照を解き、セッショングラフ全体（collection.metas 等）の永久保持を防ぐ。
+	// leave で postMessage 済みの BC メッセージは配送させるため onmessage は即無効化しつつ close は次 tick。
+	destroy() {
+		if (this._dead) return;
+		this._dead = T;
+		this._loginCancel();
+		this._clearTimers();
+		if (this._histT) {
+			clearTimeout(this._histT);
+			this._histT = N;
+		}
+		this._lgPend.forEach(w => clearTimeout(w.timer));
+		this._lgPend.clear();
+		if (this._bc) {
+			const bc = this._bc;
+			this._bc = N;
+			setTimeout(() => {
+				try {
+					bc.onmessage = N;
+					bc.close();
+				} catch (e) { /* 二重 close 無視 */ }
+			}, 0);
+		}
+		this._ev.clear();
+		this.onFrame = N;
+		this.transfer = N;
+		this._hist = {};
+		this._seenA.clear();
+	}
 	_loginCancel() {
 		if (this._wT) {
 			clearTimeout(this._wT);
@@ -645,10 +678,29 @@ export class RoomSession {
 				this._onC(p);
 				break;
 			case 'J':
+				if (p.to) { // 新参加者への折返し（追加仕様: 参加時刻 UnixTime + 名乗り me{uid,t,md}）。自宛のみ処理・onFrame 非伝播
+					if (this._st.authed && p.to === this.uid) {
+						const i = this._st.participants.findIndex(x => x.uid === this.uid);
+						if (i >= 0 && Number.isFinite(p.at) && (this._st.participants[i].t == null || p.at < this._st.participants[i].t)) {
+							this._st.participants[i].t = p.at; // 自身の参加時刻は他メンバー最早観測値で確定
+							this._emit('participants', this._st.participants);
+							this._snap();
+						}
+						if (p.me && p.me.uid && p.me.uid !== this.uid) this._touchParticipant(p.me.uid, p.me.t, p.me.md);
+					}
+					break;
+				}
 				if (this._login && !this._st.authed && p.uid !== this.uid) this._login.need.add(p.uid); // 採決中の roster 補充（§6.2）
 				if (this._st.authed) {
-					this._touchParticipant(p.uid);
+					const isNew = p.uid && !this._st.participants.some(x => x.uid === p.uid);
+					this._touchParticipant(p.uid, N, p.md);
 					this._histTouch(p.uid, T);
+					if (isNew && p.uid !== this.uid && this.room.cr === this.uid) this._sendC(); // 追加仕様: 新規参加者へ部屋設定(mx/srvOn 等)を再配信
+					if (p.uid !== this.uid) { // 名乗り折返し（無条件）。再参加者は自 roster に残りするため isNew では拾えない（退避復帰 v1.3）。折返しは to 宛のみ処理でループなし
+						const rec = this._st.participants.find(x => x.uid === p.uid),
+							me = this._st.participants.find(x => x.uid === this.uid);
+						this.sendFrame(Protocol.mk('J', { to: p.uid, uid: p.uid, at: (rec && rec.t) || Date.now(), me: { uid: this.uid, t: (me && me.t) || Date.now(), md: this.mode } }));
+					}
 					if (this.onFrame) try {
 						this.onFrame(p, from, this.rid); // 参加者増で自索引再周知（§9.4）
 					} catch (e) {
@@ -688,7 +740,7 @@ export class RoomSession {
 		if (!this._st.authed || !p.uid || !p.anonce || p.uid === this.uid) return; // 既存（認証済み）メンバーが採決
 		// 参加側が J を見逃していると採決 roster が作れないため、採決応答時に自己 J を再告知する（§6.2）
 		const cfg = (this.settings && this.settings.cfg) || {};
-		this._wsSend(Protocol.mk('J', { uid: this.uid, gen: this.jGen, grid: [cfg.GRID_COLS || 4, cfg.GRID_ROWS || 8] }));
+		this._wsSend(Protocol.mk('J', { uid: this.uid, gen: this.jGen, grid: [cfg.GRID_COLS || 4, cfg.GRID_ROWS || 8], md: this.mode }));
 		if (this.seenAnonce(p.anonce)) return; // 処理済み anonce は再採決しない（§6.2/§6.5）
 		const ok = await this._checkW(p);
 		this._wsSend(Protocol.mk('O', { to: p.uid, anonce: p.anonce, ok }));
@@ -738,6 +790,16 @@ export class RoomSession {
 		}
 		return e;
 	}
+	// C 自前送出（作成者。J 新規検知時の再配信。cg は現値のまま=受信側の採用条件を満たせば十分）
+	_sendC() {
+		this.sendFrame(Protocol.mk('C', {
+			rid: this.rid, uid: this.uid, cr: this.room.cr, cg: this.room.cg || 0,
+			pw: this._pw, pwSalt: this._pwSalt,
+			srvOn: this.room.srvOn === T || this.room.srvOn === true,
+			xorig: this.room.xorig === T || this.room.xorig === true,
+			oa: this.room.oa || [], mx: +this.room.mx || 0,
+		}));
+	}
 	// ---- C: 部屋設定通知（§8.3 整合 / §6.6 xorig / §6.8 srvOn / §6.9 再作成競合）----
 	_onC(p) {
 		if (p.rid && p.rid !== this.rid) return;
@@ -746,6 +808,8 @@ export class RoomSession {
 			this.lastWarn = { type: 'xorig', cg: p.cg }; // 自己記録と異なる xorig の C は無視+警告（§6.6/§8.3）
 			return;
 		}
+		// cr 未学習（新規参加者の初 C）ならそのまま採用。cr 既知で不一致のみ §6.9 競合扱い
+		if (!this.room.cr && p.cr) this.room.cr = p.cr;
 		const sameCr = (p.cr || '') === (this.room.cr || '');
 		if (!sameCr) {
 			this._cDiff = T;
@@ -766,6 +830,7 @@ export class RoomSession {
 		this.room.cg = p.cg;
 		this.room.oa = p.oa || this.room.oa || [];
 		this.room.srvOn = p.srvOn === T || p.srvOn === true;
+		if (+p.mx > 0) this.room.mx = +p.mx; // 追加仕様: 部屋毎アップロード上限（作成者 C で配信）
 		if (this.room.xorig === T || this.room.xorig === true) this.room.oa = this.room.oa.map(String);
 		else this.room.oa = []; // xorig=false の oa は強制的に自オリジン扱い（§6.6。永続値は無視）
 		if (this._login && this._login.mode === 'server' && !this.room.srvOn) this._failLogin('msg.auth.srvDisabled');
@@ -776,14 +841,15 @@ export class RoomSession {
 			return;
 		}
 		this._saveRoom(this._pw, this._pwSalt).catch(e => ef(e, 'room_session.saveRoom')); // room.json 反映（§8.3）
+		this._emit('roomUpdate', this.room); // 追加仕様: room_app 側 ctx.room（mx/srvOn 表示）へ同期
 		this._snap();
 	}
 	// ---- 参加者表（J/B で更新・30h TTL なし=サーバ E/L 側で追跡、§9.12/§11.1 不在の表）----
-	_touchParticipant(uid) {
+	_touchParticipant(uid, at = N, md = N) {
 		if (!uid) return;
 		const i = this._st.participants.findIndex(x => x.uid === uid);
-		if (i < 0) this._st.participants.push({ uid, t: Date.now() });
-		else this._st.participants[i].t = Date.now();
+		if (i < 0) this._st.participants.push({ uid, t: at || Date.now(), md: md || N });
+		else if (md && this._st.participants[i].md !== md) this._st.participants[i].md = md; // 参加時刻 t は初観測で固定（昇順表示の基準）
 		this._emit('participants', this._st.participants);
 		this._snap();
 	}
@@ -811,7 +877,7 @@ export class RoomSession {
 			if (ab && ab.byteLength) {
 				const o = JSON.parse(Y.u2s(ab));
 				if (o && typeof o === 'object') {
-					this.room = Object.assign({ nm: '', pw: '', pwSalt: '', srvOn: F, cr: '', cg: 0, xorig: F, oa: [] }, this.room, o);
+					this.room = Object.assign({ nm: '', pw: '', pwSalt: '', srvOn: F, cr: '', cg: 0, xorig: F, oa: [], mx: 0 }, this.room, o);
 					this._pw = this.room.pw || this._pw;
 					this._pwSalt = this.room.pwSalt || this._pwSalt;
 				}
@@ -825,7 +891,7 @@ export class RoomSession {
 		if (!this._owner) return;
 		this.room.pw = pw || '';
 		this.room.pwSalt = pwSalt || '';
-		const o = { rid: this.rid, nm: this.room.nm, pw: this.room.pw, pwSalt: this.room.pwSalt, srvOn: !!this.room.srvOn, cr: this.room.cr, cg: this.room.cg || 0, xorig: !!this.room.xorig, oa: this.room.oa || [] };
+		const o = { rid: this.rid, nm: this.room.nm, pw: this.room.pw, pwSalt: this.room.pwSalt, srvOn: !!this.room.srvOn, cr: this.room.cr, cg: this.room.cg || 0, xorig: !!this.room.xorig, oa: this.room.oa || [], mx: +this.room.mx || 0 };
 		if (this.room.conflict) o.conflict = T; // §6.9 競合時 conflict: true 追記
 		await OPFS.w(STORAGE.roomFile(this.rid), Y.s2u(JSON.stringify(o)).buffer);
 	}

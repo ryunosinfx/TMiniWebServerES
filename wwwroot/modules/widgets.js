@@ -7,7 +7,7 @@ import { I18N } from './i18n.js';
 const tx = k => (I18N.has(k) ? I18N.t(k) : k);
 
 export function Toggle({ parent, label, onChange } = {}) {
-	const el = Vw.div(parent, {}, { display: 'inline-flex', alignItems: 'center', gap: '6px' });
+	const el = Vw.div(parent, { class: 'ir-toggle' }); // 装飾は css/imgroom.css（クラスで切り分け）
 	const ipt = Vw.ipt(el, { type: 'checkbox' });
 	const lb = Vw.add(el, 'span');
 	lb.textContent = tx(label);
@@ -18,10 +18,10 @@ export function Toggle({ parent, label, onChange } = {}) {
 }
 
 export function Progress({ parent } = {}) {
-	const el = Vw.div(parent);
-	const wrap = Vw.div(el, {}, { height: '10px', background: '#ddd', 'border-radius': '5px', overflow: 'hidden' });
-	const bar = Vw.div(wrap, {}, { height: '100%', width: '0%', background: 'blue' }); // C.bi 相当の縞は使わず単色
-	const cap = Vw.div(el, {}, { 'font-size': '12px' });
+	const el = Vw.div(parent, { class: 'ir-progress' });
+	const wrap = Vw.div(el, { class: 'ir-prog-wrap' });
+	const bar = Vw.div(wrap, { class: 'ir-prog-bar' }); // width のみ動的（インライン可）
+	const cap = Vw.add(el, 'div', { class: 'ir-prog-cap' });
 	Vw.sS(cap, C.vH);
 	const set = r => {
 		const x = Math.max(0, Math.min(1, Number(r) || 0));
@@ -36,10 +36,7 @@ export function Progress({ parent } = {}) {
 }
 
 export function Badge(parent, cls, textStr) {
-	const el = Vw.add(parent, 'span', {}, {
-		display: 'inline-block', padding: '1px 6px', 'border-radius': '8px',
-		background: '#888', color: '#fff', 'font-size': '12px',
-	});
+	const el = Vw.add(parent, 'span', { class: 'ir-badge' }); // 配色は CSS クラス（cls で上書き指定）
 	if (cls) Vw.aC(el, cls);
 	el.textContent = tx(textStr);
 	return el;
@@ -48,11 +45,7 @@ export function Badge(parent, cls, textStr) {
 let tEl = null; // body 固定オーバーレイ（同時 1 個、再呼び出しで差し替え）
 export function Toast(msg, ms = 4000) {
 	if (tEl) Vw.rm(tEl);
-	const el = (tEl = Vw.div(Vw.gB(), {}, {
-		position: 'fixed', left: '50%', bottom: '16px', transform: 'translateX(-50%)',
-		background: '#222', color: '#fff', padding: '8px 14px', 'border-radius': '6px',
-		'max-width': '90vw', 'z-index': '9999',
-	}));
+	const el = (tEl = Vw.div(Vw.gB(), { class: 'ir-toast' }));
 	el.textContent = tx(msg);
 	setTimeout(() => {
 		if (tEl === el) Vw.rm(tEl), (tEl = null);

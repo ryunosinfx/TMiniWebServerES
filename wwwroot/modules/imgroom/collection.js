@@ -46,15 +46,61 @@ export class Collection {
 	// ---- meta/manifest ローディング ----
 	async loadManifest() {
 		await OPFS.rd;
-		const p = STORAGE.manifest(this.rid, this.uid);
-		this.manifest = (await OPFS.isEf(p)) ? JSON.parse(Y.u2s(await OPFS.r(p))) || [] : [];
-		if (!Array.isArray(this.manifest)) this.manifest = [];
-		this.mset = new Set(this.manifest.map(e => e && e.h).filter(Boolean));
+		const p = STORAGE.manifest(this.rid, this.uid),
+			pj = p.replace(/\.json$/, '.jsonl');
+		const m = new Map(); // h -> entry（x 行で除去。last-wins）
+		this._mLines = 0;
+		if (await OPFS.isEf(pj)) {
+			for (const line of Y.u2s(await OPFS.r(pj)).split('\n')) {
+				if (!line) continue;
+				this._mLines++;
+				let e;
+				try {
+					e = JSON.parse(line);
+				} catch (er) {
+					continue;
+				}
+				if (!e || !e.h) continue;
+				if (e.x) m.delete(e.h);
+				else m.set(e.h, e);
+			}
+		} else if (await OPFS.isEf(p)) {
+			// legacy 全量 JSON → jsonl（初回のみ移行）
+			let arr = [];
+			try {
+				arr = JSON.parse(Y.u2s(await OPFS.r(p))) || [];
+			} catch (er) {
+				arr = [];
+			}
+			if (Array.isArray(arr)) for (const e of arr) if (e && e.h) m.set(e.h, e);
+		}
+		this.manifest = [...m.values()];
+		this.mset = new Set(this.manifest.map(e => e.h));
+		this._dirty = { add: [], del: [] };
+		if (!(await OPFS.isEf(pj))) await this._writeManifestFull(); // 全書き（jsonl）+ legacy 削除
 		await this.refreshMetas(); // roomItems()/entriesForM() が meta 未取得で空にならないよう同時読み
 		return this.manifest;
 	}
+	async _writeManifestFull() {
+		const p = STORAGE.manifest(this.rid, this.uid),
+			pj = p.replace(/\.json$/, '.jsonl');
+		await OPFS.w(pj, Y.s2u(this.manifest.map(e => JSON.stringify(e)).join('\n') + (this.manifest.length ? '\n' : '')));
+		this._mLines = this.manifest.length;
+		if (await OPFS.isEf(p)) await OPFS.rmf(p); // legacy 全量 JSON 除去
+	}
 	async saveManifest() {
-		await OPFS.w(STORAGE.manifest(this.rid, this.uid), Y.s2u(JSON.stringify(this.manifest)));
+		// v1.5 §19: 差分行の追記のみ（共有毎の全量 stringify=O(N²) を解消）。行数が逸脱で compact 全書き。
+		await OPFS.rd;
+		const d = this._dirty || { add: [], del: [] };
+		this._dirty = { add: [], del: [] };
+		if (!d.add.length && !d.del.length) return this.manifest;
+		const pj = STORAGE.manifest(this.rid, this.uid).replace(/\.json$/, '.jsonl');
+		if (this._mLines <= this.manifest.length * 1.6 + 8) {
+			await OPFS.ap(pj, Y.s2u([...d.add.map(e => JSON.stringify(e)), ...d.del.map(h => JSON.stringify({ x: 1, h }))].join('\n') + '\n'));
+			this._mLines += d.add.length + d.del.length;
+		} else {
+			await this._writeManifestFull();
+		}
 		return this.manifest;
 	}
 	async refreshMetas() {
@@ -65,7 +111,7 @@ export class Collection {
 
 	// ---- §9.1 共有(画像投稿) ----
 	// -> {h10,newEntry} | {error:'tooBig'|'badType'|'noName'}
-	async share(blob, { name, mime } = {}) {
+	async share(blob, { name, mime, defer } = {}) {
 		if (!blob || !name) return { error: 'noName' };
 		if (blob.size > this.cfg.MAX_IMG_BYTES) return { error: 'tooBig' };
 		if (!/^image\//.test(mime || blob.type || '')) return { error: 'badType' };
@@ -94,6 +140,8 @@ export class Collection {
 		}
 		this.metas.set(h10, meta);
 		const newEntry = this._manifestAdd(meta);
+		// v1.5 §19: manifest 未保存の潜在バグ修正（旧: trash/purge まで未保存）。defer=true で一括共有の末に 1 回保存（fsync 回数節約）
+		if (newEntry && !defer) await this.saveManifest();
 		this.emit('changed', { added: newEntry ? [h10] : [], removed: [] });
 		return { h10, newEntry };
 	}
@@ -112,15 +160,19 @@ export class Collection {
 			await this.store.metaPut(meta);
 		}
 		this.metas.set(h10, meta);
-		if (ridB64U === this.nameB64U && this._manifestAdd(meta))
+		if (ridB64U === this.nameB64U && this._manifestAdd(meta)) {
+			await this.saveManifest(); // v1.5 §19
 			this.emit('changed', { added: [h10], removed: [] });
+		}
 		return true;
 	}
 
 	_manifestAdd(meta) {
 		if (this.mset.has(meta.h)) return false;
-		this.manifest.push({ h: meta.h, n: meta.n, r: meta.r, u: meta.u, ts: meta.ts, t: meta.t, l: meta.l, s: meta.s });
+		const e = { h: meta.h, n: meta.n, r: meta.r, u: meta.u, ts: meta.ts, t: meta.t, l: meta.l, s: meta.s };
+		this.manifest.push(e);
 		this.mset.add(meta.h);
+		if (this._dirty) this._dirty.add.push(e); // v1.5: saveManifest で 1 行追記
 		return true;
 	}
 	_manifestRemove(h10) {
@@ -128,6 +180,7 @@ export class Collection {
 		if (i < 0) return false;
 		this.manifest.splice(i, 1);
 		this.mset.delete(h10);
+		if (this._dirty) this._dirty.del.push(h10); // v1.5: x 行追記
 		return true;
 	}
 

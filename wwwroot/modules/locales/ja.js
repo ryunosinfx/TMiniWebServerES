@@ -33,7 +33,14 @@ export default {
 	'msg.offline': 'オフラインモードです', // §9.7 WS 切断
 	'msg.fetch.progress': '取得中 {n}/{m}',
 	'msg.fetch.fail': '保持者が見つかりません', // §12 A{st:nf}/Q 応答なし 全滅
-	'msg.share.tooBig': '画像が大きすぎます',
+		'lbl.cal.more': '+{n} 件',
+	'lbl.thumb.size': 'サムネサイズ',
+'msg.share.tooBig': '画像が大きすぎます（上限 {limit} MB）',
+	'msg.share.unsupported': '「{name}」はこのブラウザがサポートする画像形式ではないため、お断りしました',
+	'msg.share.tooBig': '大きすぎる画像です（ブラウザの安全なメモリ上限 256MB を明らかに超えるためお断りしました）',
+	'msg.share.over': '「{name}」({mb}MB) は上限 ({lim}MB) を超えています。\n長辺 4096px 以内への縮小と JPEG 再圧縮による変換共有をおこないませんか？\n（デコードできない形式や、メモリ上限を超える大きさは変換前にお断りします）',
+	'msg.hiber.ok': '長時間動作のためページを再読み込みしました。自動再参加しました',
+	'msg.hiber.fail': '自動再参加に失敗しました。ログインし直してください',
 	'msg.share.ok': '共有しました',
 	'lbl.trash.empty': 'ゴミ箱は空です',
 	'btn.trash.purge': '完全に削除',
@@ -77,8 +84,32 @@ export default {
 	'btn.scan': 'QR スキャン', // §5.4
 	'btn.qr.png': 'PNG 保存',
 	'btn.pw.auto': 'パスワード自動生成', // §6.3
+	'tab.view.imgs': '画像', // 追加仕様: 部屋ビュー内サブタブ
+	'tab.view.qrurl': 'URL QR',
+	'tab.view.qrpw': 'パスワード QR',
+	'lbl.qr.url': '部屋 URL',
+	'lbl.part.join': '参加時刻',
+	'lbl.maxmb': 'アップロード上限 (MB)', // 追加仕様: 部屋作成時の単一画像上限
+	'btn.view.fit': '表示幅', // 追加仕様: ビューアサイズ切替
+	'btn.view.native': 'ネイティブ',
+	'btn.view.z4': '1/4',
+	'btn.view.h2': '1/2',
+	'btn.view.x2': '2倍',
+	'btn.view.x4': '4倍',
+	'lbl.view.size': 'サイズ',
+	'lbl.meta.sha': 'SHA256',
+	'lbl.qr.scan.url': 'スキャンするとブラウザで ImageRoom が開き、部屋名が入力済みの参加画面になります。参加には部屋パスワードの入力が必要です。',
+	'lbl.qr.scan.pw': 'スキャンすると ImageRoom のパスワード参加（パスワード入力済み）に使用できます。',
+	'lbl.qr.secret': 'この QR には部屋パスワードが平文で埋め込まれています。秘密鍵として取り扱い、信頼できる人に見せる・保存後に表示端末から削除するよう注意してください。',
 	'btn.xorig': 'クロスオリジン許可', // §6.6 作成オプション
 	'btn.room.menu': '部屋設定', // §5.2 ルームキーメニュー
+	'btn.fs': '全画面表示',
+	'btn.slide': 'スライドショー',
+	'msg.fs.exit': '全画面表示を終了しますか？',
+	'msg.slide.exit': 'スライドショーを終了しますか？',
+	'btn.confirm.keep': '続ける',
+	'btn.confirm.stop': '終了',
+	'btn.trash.ico': '🗑️',
 	'btn.trash.restore': '復元', // §5.6
 	'lbl.qr.text': 'QR テキスト',
 	'lbl.autodl.count': '自動 DL 済み', // §5.7 台帳件数

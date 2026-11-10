@@ -1,8 +1,15 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v1.0
-- 日付: 2026-11-08
+- ステータス: ドラフト v2.1
+- 日付: 2026-11-10
 - 改訂履歴:
+  - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
+  - v1.3.3: 1024 枚投入ストレッサー（§15.11）。破綻なしを確認。併せて OPFS 他高頻度 info ログ（Y.js io）をデフォルト無効化（グローバル `__IRLOG` で復元）。共有 88.6s→33.4s、リロード後ログイン 37.6s→6.5s、一括 ZIP 28.5s→5.1s、定常 heap 22.6→4.1MB、relogin 毎の増分は消滅（増分の大半はログ保持が実体で、アプリ実体リークはノイズ水準 ≈+0.07MB/回）
+  - v1.3.2: 低スペック/低メモリ端末想定の実測性能チェック（§15.10）。実測中に実バグ 3 件を検出・修正: ①自分の画像が開けない（自宛 P2P が永久タイムアウト→自はローカル store 直取得）②一括 DL が初回呼び出しで必ず例外（bulk_dl.js の Y.ef 誤用・tsOf 未定義・onPart 引数不一致）③再ログイン後のカレンダーが白紙（Vw.aC/rC が複数クラストークンを classList に渡して例外→全項目スキップ。複数トークン対応）
+  - v1.3.1: 中間チェック（XSS・メモリ監査）によるクライアント側修正（§15.9）: ログアウト後の BroadcastChannel 未解除でセッショングラフ全体が永久保持されるリーク（session.destroy 追加）、transfer.destroy 未呼び出し、シート thumbs の manifest 外残留、QR カメラスキャンの stop 未取得による無限稼働（Promise 誤使用）、モーダル直接除去による document keydown/DOM 残留、location.hash 不正 % での boot 停止保護。サーバー側（TMiniWebServerES）の修正は今回の指示外（§15.9 に記録）
+  - v1.3: 追加仕様（§15.8）: 長時間作動時の一時退避（12 時間超で一時情報を AES-GCM 暗号化し localStorage へ書き出してリロード。復鍵は sessionStorage 限定で同一タブのリロードのみ復号可。リロード後に条目は即削除、有効期間 5 分を過ぎた条目は廃棄。全タブが個別 tabId で独立に退避・自動再参加）。サーバーモード低メモリ化（SliceCache LRU 上限・送信完了 chunks 保持短縮・ビューア一時バイト即時解放）。伴う protocol 修正: 名乗り折返し J を無条件化（再参加者 roster 補充）
+  - v1.2: 追加仕様（§15.7）: ビューア画像下を 3 行に統合（投稿者・部屋 / 投稿日・MimeType / SHA256Sum。SHA-256 は表示時その場で計算）、ズーム 6 段（表示幅・1/4・1/2・ネイティブ・2倍・4倍）と選択中ボタンの明示、QR エリアは画像と URL/ボタン/説明を横並びにしスキャン時の挙動を併記、パスワード QR は秘密鍵色系（`--ir-sec*`）の独立エリアで URL QR と区別。`Vw.tC` の force 引数正式対応（選択状態クラス .on の確定動作）
+  - v1.1: 追加仕様（§15）: 部屋 URL/パスワードの QR タブ（作成者専権・サーバーモードは URL QR 常時表示）、参加者バッジ列（参加時刻昇順・サーバーモード参加者に S マーク・参加時刻の相互通知）、部屋単位の単一画像アップロード上限 `mx`（既定 10MB・作成時指定・C で配信）、ビューア改訂（タイトル=ファイル名・表示幅/ネイティブ切替・ゴミ箱右端・保存ボタン廃止=表示で OPFS 確定・☓ 右上閉じ）、样式の `wwwroot/css/imgroom.css` 外出し（テーマ変数・クラス名で切り分け）。リレーサンプルの `leaveRoom` を socket 実体一致化（旧接続の遅延 close による再ログイン退避を防止）、サーバーモードの採決塩を seed 塩（月塩）から分離（日付塩は W/at の使い捨てのみ）
   - v1.0: pwHash を **seedSaltedHash**（room 名+オリジン+期間のソルトハッシュ）に改訂し、ログイン後に OPFS 保管・採決は保管値照合方式へ（平文保持資格制限を廃止）。ゴミ箱画像の同期除外（ゴミ箱から消えたら再開）。作成者端末消失時の同一部屋名再作成と競合判定（先にログイン済みが勝ち・「別の管理者が部屋を立ち上げているようです」）。多言語対応（`modules/i18n.js` + 言語パック + `LANG` 設定、最低 ja/en）を追加
   - v0.9: pwHash のソルト化（通常: UTC `YYYYMM`+ユーザー名+オリジンで**月境界に強制ログアウト・パスワード再要求**、サーバー: 参加日 `YYYYMMDD`+ユーザー名+オリジンで免除）。サーバーモード許可 `srvOn`（作成者専権・随時 ON/OFF 可、OFF 時は参加中サーバーを強制ログアウト）。サーバーモードの自動ダウンロード（ON/OFF、h10 台帳 `autodl.json` で DL 済み無視・クリアボタン）を追加
   - v0.8: 部屋単位のログイン/ログアウトのブラウザプロファイル単位 1 セッション制御（§9.12）、`xorig` は作成者のみ・作成時確定で変更不可（§6.6）、サーバーモード追加（ログイン画面で選択・自動同期・参加者/過去参加者一覧・OPFS 量表示、§5.7）
@@ -811,3 +818,290 @@ msg  ≒ 11.0 KB
 - 保持者候補の最適化（応答遅延計測に基づくスコアリング。ラウンドロビンからの拡張）
 - 古い manifest・シート・孤児 bodies の GC 間隔仕様（ゴミ箱スイープと統合可）
 - 言語パックの追加言語（ja/en 以外: どの順で増やすか、翻訳リソース運用）
+
+---
+
+## 15. v1.1 追加仕様
+
+### 15.1 QR タブと URL 共有
+- 部屋ビューは作成者のみ表示されるサブタブを持つ: **画像 / URL QR / パスワード QR**。
+- URL QR の内容は参加 URL `http://host:port/img_room.html#<部屋名 b64url>`（§5.1 のハッシュ参加と同じ形式。`encodeURIComponent` 適用）。
+- パスワード QR は §8.4 の認証 QR（`TMIWR1:<部屋名>:<平文 pw>`）。平文 pw を保持する作成者セッションでのみ生成可（§6.4）。非保持時は引导メッセージ。
+- **サーバーモード参加者は部屋ビューに URL QR を常時表示**（サブタブとは独立。コピペ・PNG DL 可）。
+
+### 15.2 参加者バッジ列と参加時刻
+- 部屋名下に参加者バッジ列を描画。**参加時刻（UnixTime, ms）の昇順**。自バッジは強調枠。
+- サーバーモード参加者のバッジには **S マーク**。モードは J フレームの `md` フィールドで伝搬（`normal|sync|server`）。
+- 参加時刻の相互通知（リレーは時刻を付さないと仮定したアプリ層プロトコル）:
+  - メンバーは新規 J（未既知 uid）を検知すると折返し `J {to, uid, at, me:{uid,t,md}}` を返す。`at` = その J を観測した時刻、`me` = 自己紹介。
+  - 受領側は自身の参加時刻を `at` の最小値で確定し、`me` を参加者表へ取り込む（既知メンバーの参加時刻もこれで補充される）。
+  - 折返し J はデータ系フック（M 再周知等）を発火しない（`to` 付きはセッション内で消費）。
+- 参加者表の `t`（参加時刻）は**初観測で確定**し、以後の J で上書きしない（v1.0 までは接触毎更新だった）。
+
+### 15.3 部屋単位のアップロード上限 `mx`
+- 単一画像の上限 bytes を `room.mx` として room.json と **C フレーム**（`mx` フィールド）で保持・配信。既定（`mx`=0/不在）は `CFG.MAX_IMG_BYTES` = **10 MiB**。
+- 作成フォームに上限入力（MB、1〜200、既定 10）。作成者は再ログイン時と設定変更時に C を再配信。**新規参加者には J 検知時に作成者が C を再送**し、mx/srvOn 等を後から教える。
+- 超過共有は `{error:'tooBig'}` → トーストに上限 MB を表示。
+
+### 15.4 ビューア改訂
+- モーダルタイトルは**ファイル名**（デコード済み meta.n）。ハッシュの表示行は廃止。
+- 画像は **表示幅（fit: 幅 100%/高さ上限）⇄ ネイティブサイズ（実寸・折返しスクロール）** 切替。現在サイズ/ネイティブサイズ（px）を併記。
+- **保存ボタン廃止**: 表示経路（本体取得完了時）に OPFS 本体保存を自動確定する。DL のみ残る。
+- ゴミ箱ボタンは操作行の**右端**。閉じるは **☓（右上）**・Esc・背景クリック。共通 dlg() に統一。
+
+### 15.5 样式の外出し
+- 全样式は `wwwroot/css/imgroom.css`。色・枠線・角丸等は `:root` のテーマ変数（`--ir-bg` 等）で差し替え可能。
+- JS は**クラス名のみ**で装飾を切り分け、設定値由来の寸法（サムネイルサイズ等）は CSS 変数（`--ir-thumb`）を JS から注入する。動的状態（表示/非表示・プログレス幅）のみインラインStyle を許容。
+
+### 15.6 実装上の追補（サーバー・認証）
+- サンプルリレー `Chat.leaveRoom` は**socket 実体一致**で部屋条目を削除する（userId 一致削除だと、旧接続の close イベント遅延到達が同一 userId の再ログインセッションを追い出すすれ違いが起きる）。
+- サーバーモードの seed 塩は常に**月塩**（保管 seed と一致させる）。日付塩 `YYYYMMDD` は採決 W/at の使い捨て塩のみ（v1.0 の saltServer() seed 導出はcreator 単独再ログインを成立させないため改訂）。
+
+### 15.7 v1.2 追補（ビューア・QR）
+- **メタ 3 行**: 画像下は (1) 投稿者・部屋 (2) 投稿日・MimeType (3) SHA256Sum の 3 行のみ。SHA-256 は保管されない（内容アドレスは h10）ため、ビューア表示時に取得バイトから `crypto.subtle.digest` でその場計算し 16 進 64 桁で表示（非安全コンテキスト等では `(N/A)`）。
+- **ズーム 6 段**: 表示幅（既定）/1/4/1/2/ネイティブ/2倍/4倍。選択中のボタンは `.ir-btn.on` で明示。倍率段は img の幅をネイティブ基準の実ピクセルでインライン指定し、ラッパの `.zoom` クラスで max 制限を外す（寸法のみ JS、見た目は CSS の原則維持）。
+- **QR エリア**: QR 画像（`.ir-qrpic`）と URL 欄・コピー/PNG ボタン・説明（`.ir-qrnote`）を `.ir-qrrow` で横並び。URL QR には「スキャンすると部屋名入力済みの参加画面が開く。参加にはパスワードが必要」を併記。
+- **パスワード QR**: 秘密鍵色系テーマ変数 `--ir-sec`/`--ir-sec-bd` の独立枠（`.ir-secret`）に収め、平文パスワードである旨の警告とスキャン挙動を記載。URL QR とは別枠・別色で明確に区別する。
+- **ビューア単一化**: 同一画像の再クリックは無視、別画像表示時は既存ビューアを閉じる（モーダルの多重防止）。
+- **`Vw.tC(e, cls, force)`**: 第 3 引数（force）を正式サポート（省略時はトグル従来通り）。選択状態クラス（`.on`）のトグル取り違えバグの修正を兼ねる。
+
+### 15.8 v1.3 追補（一時退避とサーバーモード低メモリ化）
+- **一時退避（hibernate）**: アプリは長時間作動するため、起動から `HIBER_AFTER_MS`（既定 12 時間）を超えたら、一時情報（`{rid, nb, uid, mode, pw?}`）を暗号化して localStorage へ書き出し、`location.reload()` する（`modules/imgroom/hibernate.js`）。経過は 60 秒間隔チェック+`visibilitychange` で検知（背景タブのタイマ鈍化対策）。退避は安全点（モーダル表示中・アップロード共有中・送受信転送中・pump 中でないこと）で行い、`HIBER_WAIT_MAX_MS`（既定 5 分）で強制。複数タブの同時リロードを避けるジッタ（最大 30 秒）。
+- **暗号化と保管**: AES-GCM 256。鍵（256bit 乱数）は sessionStorage（タブ固有・リロードでは保持、タブを閉じると消滅）に置き、localStorage（同一オリジンの全タブ共有）には暗号文のみをキー `ir.hiber.v1.<tabId>` で保存する。tabId は sessionStorage の乱数識別子で、リロードを跨ぎタブクローンへは移らないため、**復号は同一タブのリロードでのみ可能**。平文パスワードを作成者タブが保持している場合のみ退避情報に含める（復帰後も pw QR・C 再発行が可能）。
+- **復帰と有効期間**: ブート時 `restore()` は自タブ条目を即座に消費（削除）し、`at` から **5 分（`HIBER_TTL_MS`）以内**なら復号して自動復帰（home スキップ → `tryResume`: openRoom → `session.rejoin()`（seed 採決）→ 不可なら保管 pw で login → 不可ならその部屋のログイン画面）。超過条目は廃棄し通常起動。他タブの条目は生存中の退避を消さぬよう期限切れ分のみ掃除。非安全コンテキスト（`crypto.subtle` 無）では平文を残さないため書き出しをスキップしリロードのみ（復帰は autoJoin 等従来経路）。リロード前の `AppSettings.flush()` で OPFS 状態を確定させる。
+- **サーバーモード低メモリ化**: `SliceCache` に LRU 上限（通常 64・サーバーモード 8。`SCACHE_MAX`/`SRV_SCACHE_MAX`、get で touch）。「G 再送待ち」の完了送信 chunks 保持 `outDone` をサーバーモード 10 秒へ短縮（`G_HOLD_MS`/`SRV_G_HOLD_MS`）。ビューアは SHA 計算用 ArrayBuffer を計算後即解放、モーダル閉じ時に `img` の src 属性を除去しデコード済みビットマップを解放（表示はサーバー既定 CSP `img-src data:` の制約で data: URL のまま）。取得の直列単一フライト（§9.3.7）とカレンダー窓レンダリング（§5.5）は既存のメモリ抑制策として維持。
+- **protocol 修正（v1.3 伴う）**: 名乗り折返し `J{to,...}` を**無条件化**（§8.3）。ページ更新（退避復帰・手動リロード）ではリレーが退出を通知しないため他メンバーの roster に再参加者が残り続けて `isNew` ゲートでは折返しが起こらず、再参加者側の roster が補充されない不具合があった。折返しは `to` 自宛のみ処理で伝播しないためループなし。折返しに含まれる参加時刻 `at` で再参加者の既存参加時刻も維持される。
+- **テスト**: `browserTest/tests/img-hiber.mjs`（11 チェック: 参加者側/作成者側の即時退避→リロード→自動再参加・roster 補充、localStorage 条目と sessionStorage 鍵の消去、復帰後の二重退避なし・タイマ再武装、tabId 安定、pw QR 復活（平文 pw 復帰）、有効期間超過条目（10 分前）は無視・削除）。
+
+### 15.9 v1.3.1 中間チェック（XSS・メモリ監査）
+- **XSS 監査結果（クライアント）**: `innerHTML`/`insertAdjacentHTML`/`document.write`/`DOMParser`/`eval`/`new Function` は wwwroot 全体で 0 件。ユーザー制御文字列（部屋名・uid・ファイル名・C/M フレーム・QR 結果・補間値）は全て `textContent`/`setAttribute`/`.value`/`.title` の安全な sink にのみ到達。**脆弱性 0 件**。この安全性は「innerHTML ゼロ」運用規約に依存するため、今后も innerHTML 系 API の使用を禁止する。
+- **クライアント修正（v1.3.1）**:
+  - `RoomSession.destroy()`（新設）: `leave()` 後に呼び、`BroadcastChannel` を閉じ（leave で postMessage 済みの配送のため close は次 tick、`onmessage` は `_dead` で即時無効化）、`_ev` 購読・`onFrame`・`transfer` 参照・`_hist`・`_lgPend`/`_histT` タイマを解除。これでログアウト→再ログイン毎に旧 ctx グラフ（`collection.metas` 全件等）が BC を GC 根として永久残留していた（最大級）。
+  - `disposeRoom()`: `session.destroy()`・`transfer.destroy()`・`_mTmr` clear・`peerMap.clear()` を追加。
+  - `SheetRoom.rebuild()`: 末尾で `thumbs` を現 manifest h10 集合外で削除（投稿毎の Blob キャッシュ無制限成長防止）。
+  - `scanFlow()`: `QRScan.camera` は async（Promise）であるため `then` で `stop` を確実に保持し、☓/Esc/背景/done の全閉経路（`_onClose`）でカメラ+rAF+復号ループを停止。従来は stop を取得できずカメラが無限稼働、かつ成功時も「カメラ不可用」表示になる機能バグだった。
+  - モーダル閉じは `box._close()` 経由統一（scanFlow の done・退室ボタン。`Vw.rm(box._mdl)` 直接は document keydown と DOM を残留させるため禁止）。
+  - `RoomApp.hashName()`: ハッシュの `decodeURIComponent` を try/catch 化（不正 % シーケンスでの boot 全停止＝自己 DoS 防止）。
+- **未修正（サーバー側・対応指示待ちで記録のみ）**: ①静的配信のパストラバーサル（`getPhysPathInWwwroot` が decode 後の `..` を無検証。実測で `/../package.json`・`/../.git/config` が 200 で配信された。**LAN 公開前に修正必須**)。②`/sample` の HTML 展開はルート正規表現が特殊文字を弾くため現状無被害だがハンドラ側エスケープ不在。③`TMiniWebServerUtil.escapeHtml` はループ上限バグで 1 文字目しかエスケープしない（未使用）。④CSP ヘッダーは `img-src` のみ、meta 側 `script-src 'unsafe-inline'`/`default-src *` は引き締め推奨。
+- **回帰**: 修正後 img-room / img-spec / img-demo / img-hiber すべて緑。
+
+### 15.10 v1.3.2 低スペック・低メモリ実測（browserTest/tests/img-perf.mjs）
+- 手法: headless chromium + CDP `Performance.getMetrics`（JS heap/Nodes/JSEventListeners/TaskDuration/Layout）+ `HeapProfiler.collectGarbage` 強制後スナップショット + アプリ内部 Map サイズ + `Emulation.setCPUThrottlingRate(4x)` で低スペック模擬。シナリオ: 起動→部屋作成→**41 画像共有**→カレンダー窓→大画像(2.6MB)ビューア→一括 ZIP→ログアウト/再ログイン×3→リロード(41 件 boot)→4x スロットル再表示。
+- 実測値（chromium、41 画像 = 40×~6KB + 1×2.6MB）:
+  | 状態 | JS heap | 備考 |
+  |---|---|---|
+  | 起動(home) | 2.3MB | 依存ライブラリ込み |
+  | 41 画像共有後 | 3.8MB | metas/thumbs/sheet 全部入り |
+  | 大画像ビューア表示ピーク | 9.5MB | data: URL 化（CSP 制約。閉じると 4.0MB に戻る） |
+  | 一括 ZIP(41 件) | +0.8MB ピーク→戻る | 646ms・1 パート |
+  | リロード後の boot(41 件) | 3.0MB | OPFS meta 41 件読込 ~150ms、taskS 0.7s |
+  | 月窓再表示 | 32ms(1x) / **873ms(4x)** | 低スペック模擬でも 1 秒未満 |
+  | ログアウト/再ログイン×3 | 4.6→5.3MB | **残留リーク +~0.35MB/回**（下表 残り課題） |
+- 修正した実バグ（実測中発見・すべて regression 4 種緑で確認済み）:
+  1. **自分の画像が開けない**: `RoomCalendar.fetchBody` が自保持分も P2P 経由にし、自タブ宛エコーは session が無視するため REQ_TIMEOUT(10s) 恒久失敗。自 uid が保持者なら `img.bodyOf`（ローカル OPFS）から直接返す（r マージで本体未保持時は transfer 経路へフォールバック）。低スペック機で自画像閲覧が即時化。
+  2. **一括 DL が全件で失敗**: `bulk_dl.js` が (a) 存在しない `Y.ef` を 4 箇所で呼ぶ（ef は named import）(b) 未定義の `this.tsOf` で sort が例外 (c) `onPart(blob,…)` と呼び出し側 `{name,blob}` の不一致 → 正しく ZIP パートがダウンロードされることを download イベントで検証。
+  3. **再ログイン後カレンダー白紙**: `Badge` が `Vw.aC(el,'ir-badge-off ir-graybadge')` と複数クラスを `classList.add` に渡す → DOMException → `CalView.renderItem` 全項目スキップ。`Vw.aC/rC` を空白区切り複数トークン対応へ修正（単一トークンの全既存呼び出しは挙動不変）。relogin 直後は roster 未形成のため全項目が一時的にグレーバッジ（参加者受信で自動復旧）。
+- 残り課題（要観察・軽微）: ログアウト/再ログイン 1 回あたり **+~0.35MB**（旧世代 1 組分の view DOM/RoomCalendar/RoomSession が detached で残留。steady-state で 2 世代に収まり線形増は減速。12h 退避リロードで全解放されるため実運用上限は小さい）。Census により CalView/内側窓・SliceCache・thumbs・BroadcastChannel・カメラ・モーダル keydown の残留は v1.3.1 修正で解消済みを確認。
+- テスト: `node tests/img-perf.mjs` → 各行 JSON メトリクス + `PERF DONE`。しきい値アサートは持たず計測レポート（数値は回帰監視用ログとして spec に記録）。
+
+### 15.11 v1.3.3 1024 枚投入ストレッサー（browserTest/tests/img-perf1024.mjs）
+- 手順: index 番号+模様を埋め込んだユニーク PNG（240×180、計 ~5MB）を 1024 枚生成し、**実アプリと同じ file input 1 括投入→share ループ**で共有。月/週/日窓（全 1024 件が同日セルに集中）、ビューア、一括 ZIP、リロード cold boot、ログアウト/再ログイン×2。
+- 結果: **破綻なし**（pageerror ゼロ・全機能完遂）。ログ無効化（v1.3.3）後の数値:
+  | 項目 | ログ常時 ON (v1.3.2) | ログ無効 (v1.3.3) |
+  |---|---|---|
+  | 1024 枚共有 | 88.6s / 進行中ピーク 65MB | **33.4s / ピーク 27MB** |
+  | 定常 heap (shared:1024) | 22.6MB | **4.1MB** |
+  | ビューア表示ピーク | 26.3MB | **9.5MB** |
+  | 一括 ZIP (1024 件・1 パート) | 28.5s | **5.1s** |
+  | リロード→boot / ログイン→authed | 925ms / 37.6s | **110ms / 6.5s** |
+  | relogin×2 の heap | 13.6→18.6MB | **3.7→3.8MB（横ばい）** |
+- 教訓: OPFS 系の高頻度 `console.info`（Y.js `io`）は 1 OPFS 操作あたり数百〜数千件生成され、DevTools/CDP 接続時は引数参照ごと保持されて**擬似リーク状**に増長（heap snapshot の FileSystemDirectoryHandle/path 文字列増加として特定）。**実アプリ実体の relogin リークは多重 GC 後 ≈+0.07MB/回でノイズ水準**。io はデフォルト無効・`globalThis.__IRLOG = true` で復元。
+- 要観察（破綻ではない）: 同一日に 1024 件ある日、月窓のサムネイル実体化は遅い（窓内 wanted 全件 vs SliceCache 上限 64 でスライス取得が順送り、計測時 img 7〜90/1024）。表示自体とスクロールは動作。改善案は日セルの表示上限+「他 N 件」または LRU 引き上げ → **v1.5 で表示上限側を実装**（§19①。perf1024 月窓 mounts 1024→12）。
+
+## 17. 追加仕様 v1.4: 大きな画像・形式ポリシー（投入ゲート）
+- 適用箇所: 共有入口（room_app のファイル input セクション）。**collection.share 等のプログラミック経路には適用されない**（テスト・内部処理は従来通り）。
+- 規則（この順で判定）:
+  1. **ブラウザ非対応形式 → 上記以前にお断り**: MIME がホワイトリスト（png/jpeg/webp/gif/bmp/avif）に無いファイルは確認ダイアログすら出さず Toast でお断り（TIFF 等）。変換試行中のデコード失敗（実質非対応の実体）もお断り。
+  2. **256MB 超の検知 → お断り**: ファイル自体が 256MB 超、またはヘッダのみ（先頭 64KB）から寸法を推定し `w×h×4 > 256MB`（≈64M ピクセル超）と**確定できる**ものは共有しない。ヘッダ推定不可（VP8L 等）は次の変換時のデコード成否で判定（デコード不可=お断り）。
+  3. **上限超（部屋 mx、既定 10MB）→ 確認**: 「長辺 4096px 以内への縮小 + JPEG 再圧縮（品質 82%）で共有してよいか」を確認（window.confirm）。承諾で変換（ImgProc.shrink）→ 変換後（.jpg）を共有・サムネイル化。拒否でスキップ。変換後が部屋 mx を Still 超なら collection.share の tooBig で最終拒否。
+- 実装: `ImgProc.sniffDims`（PNG IHDR / JPEG SOF スキャン / GIF / WebP VP8・VP8X / BMP / AVIF ispe のヘッダ解析）と `ImgProc.shrink`（load→canvas→toBlob jpeg、デコード失敗 null）。locale キー: msg.share.unsupported / msg.share.tooBig / msg.share.over。
+- 検証（img-spec §16 セクション + probe）:
+  - TIFF 1MB → ダイアログゼロでお断り、metas 不変 ✓
+  - PNG ヘッダ 9000×9000（11MB、推定デコード 324MB）→ ダイアログゼロでお断り ✓
+  - mx=1MB 部屋で 1.5MB jpeg → 確認表示（文件名+4096 句）→ 辞退でスキップ ✓
+  - mx=1MB 部屋で 900×900 ノイズ PNG(1.7MB) → 承諾 → jpeg ~0.4MB に変換共有、meta.t=image/jpeg・l≦mx、**保存本体が復号可（閲覧可能）** ✓
+  - mx=10MB 既定部屋で 13.1MB PNG → 承諾 → 2.6MB jpeg 変換共有（probe 実測、shrink 1.07s）✓
+- メモリ安全性: ヘッダ推定は 64KB のみ読込。デコードは 256MB 超確定段階で先行拒否するため、変換のためのフルデコードは 256MB 以内に収まる対象のみ実行される。
+
+## 18. 試算: スマホ 1 タブ × 10 万画像部屋（v1.4 現状実装）
+実測外挿（chromium デスクトップ実測 → 線形領域を確認済み。probe: metas 注入 1k/10k/100k、manifest 10 万件 stringify/parse、カレンダー items 500/5k/20k、meta 1 件 JSON 162B、refreshMetas 1 件 7ms、1024 件 cold boot taskS 2.0s）。
+
+| 構成要素 | 10 万件コスト | 種別 |
+|---|---|---|
+| metas Map（JS heap、V8 オブジェクト+文字列） | **~17MB**（166B/件・線形） | 定常 |
+| manifest（保存 JSON 文字列） | **8.4MB 文字列** + ロード時 parse 過渡 **+~20MB** | 過渡 |
+| OPFS meta ファイル 10 万個の読込（refreshMetas） | 実測 ~2ms/件 → デスク ~200s、**低スペックスマホ 15〜35 分** | 時間 |
+| sheet（index 2500 ページ・slice キャッシュ 64） | ~0.5MB + 定数 | 定常 |
+| カレンダー窓 | **破綻主因**: 月モード pgCnt=1（1 ページ全件）→ items 2 万で DOM 6 万ノード/+6MB 実測。10 万なら **DOM 30 万ノード + JS +30MB + blink オーバーヘッド 100〜200MB**、マウント全件のサムネイル bitmap デコード殺到 | 破綻 |
+| ビューア | 1 件 ≤10MB + デコード 4byte/px（≤4096px なら ≤64MB 過渡） | 過渡 |
+| JS 定常合計（metas+manifest+sheet+base） | **~25〜35MB** | — |
+| 総使用（月窓マウント時） | **JS 50〜70MB + DOM/bitmap 150〜400MB+** | — |
+
+- **判定**: 低スペックスマホ（Android Chrome 1 タブ ~256〜500MB、iOS Safari ~350〜800MB で kill）では**現状実装では破綻する**。破綻の主因は meta データ量そのもの（17MB）ではなく、①カレンダー窓の非仮想化（1 ページ全件描画）、②OPFS meta 1 件 1 ファイル読込の時間、③manifest 一括 parse の過渡メモリ。
+- **改善すれば現実化しうる概算**: ①日セル表示上限+「他 N 件」化（DOM 定数化）、②per-day meta まとめ読み（1 日 1 ファイル）、③manifest シード化/差分ログ → **定常 ~35〜60MB・起動秒レベル** で低スペックスマホでも動作可能と試算。**→ v1.5 で 3 点とも実装済み（§19。実測: 10 万件ログイン 4.8 秒・定常 heap 49.5MB で試算の範囲）**。
+
+
+## 19. 追加仕様 v1.5: 10 万画像スケーリング実装（§18 提案 3 点 + 派生修正）
+
+設計・実装手順は docs/scale100k_design.md。テスト: browserTest/tests/img-scale.mjs（新規「SCALE OK」）+ img-mobile.mjs（新規「MOBILE OK」）+ 既存 6 テスト全て緑。
+
+### ① 日セル表示上限 +「+N 件」展開（DOM 定数化）
+- CalView に `cellCap`（既定 `CFG.CELL_CAP=12`）/`moreText`/`onExpand`。セル・日リストは先頭 cap 件だけ renderItem し、残りには `button.cal-more`「+{n} 件」（ja/en 追加）。クリックで cap×4 件ずつ展開（展開分だけ DOM 増、ユーザー操作時限定）。
+- 効果: perf1024 月窓 mounts 1024→**12**、items(inner) 1024 は維持。img-scale: 30 枚同日 → セル 12 +「+18 件」→ クリックで全 30 マウント。
+- 展開済みセルの旧要素は isConnected=false になり winPass が mounts を掃除、次 pass で新要素を pickup（既存機構のまま）。
+
+### ② meta を per-day jsonl 差分ログ化（HashStore）
+- 新保存: `meta/d<dayKey>.jsonl`（dayKey=floor(ts/86400000)、1 行 1 meta、last-wins、削除は sweep で該当 h10 全行除去）。`OPFS.ap`（追記ヘルパ）新規追加。
+- `metaAll()` は day ファイル数だけ読む（10 万件=400 日なら 400 ファイル）。`metaGet()` は `_mmap`（h10→meta 全件 Map、17MB/10 万件）で O(1)。
+- **マイグレーション**: 旧 `meta/<h10>.json` は metaAll 時 1 回だけ day へ移し旧ファイルを削除（10 万 legacy の初回のみ §18 の読み取り時間がかかる）。
+- sizesOf の per 件 meta サイズは day 平均の概算（§9.11 表示用途、粗さ許容）。usage/listTrash は透過。
+
+### ③ manifest 差分ログ化（Collection）
+- 新保存: `rooms/<rid>/manifest.<uid>.jsonl`（行=entry / 削除行 {x:1,h}）。旧 `manifest.<uid>.json` は loadManifest 時に移行。
+- `saveManifest()` は署名不変: `_dirty`(add/del) を**追記のみ**（O(追加)）。行数 > 1.6×件数+8 で compact 全書き。**共有毎の全量 stringify=O(N²) 消滅**（img-scale: 10 万 manifest 下で行数 grew=1・共有 ~2.4 秒）。
+- **潜在バグ修正**: 旧実装は共有時に manifest を保存しておらず（trash/purge まで未保存）、reload 後 manifest 由来の索引が空になり得た。共有の其の場で保存（`share(...,{defer})`、UI 一括共有は末尾 1 回保存で fsync 節約 → perf1024 共有 33.4 秒で v1.3.3 と同水準）。
+
+### 派生: sheet 起動高速パス（これ無しと 10 万件ログイン不能だった）
+- `sheetidx.<uid>.json`: 群（32 コマ）指紋 fp=hash(h10:ts 列) と保存 h を記録。rebuild で fp 一致群は **decode/collage 無し**で索引・placed のみ復元（scan 復元 index 利用、`slicesOf` がシートファイルから遅延スライス）。1 群でも変わればその群だけ再生成（共有後の再構築が尾部 O(変化群) 化）。
+- **空シート生成廃止**: 全コマ未所持の群は collage を作らない（10 万件 body 欠損時 2500 白 collage + 'sheets' イベント 2500 発→setItems O(N) 嵐でログインハング、実測 68 秒超→解消）。
+- `_bodySet()`: 本体存在確認を ls('bodies') 1 回の Set 参照化（10 万×isEf 0.7ms 回避）。
+- perf1024 relogin: boot taskS 2.0→**0.4**（1024 枚 decode 不要）、sheets 32 即時復元。
+
+### スマホ解像度検証(v1.5b、テスト img-mobile.mjs「MOBILE OK」)
+390×844(dpr2・isMobile/hasTouch、DevTools device mode と同じ条件)でログイン/画像一覧/モーダル/10 万件を撮影・断言(横向ち溢れ無し・モーダルはビューポート内・cap バッジ・ページ窓追従)。この過程で 2 つの実バグを修正:
+- **VirtList がページ窓を進めない**(既存レイアウトは `.cal-box` 高さ非拘束で箱が spacer 伸長→箱内スクロール不发生のままページ全体がスクロールする)。box.scrollTop は常に 0 で **初回窓(既定 3 ページ)より古い月が永久に空グリッド**。→ `upd()` で scrollTop=0 なら箱の `rect.top` 負方向から現在ページ算出、window scroll もスロットル再評価に接続(room_calendar の窓実体化 pass も window scroll 追従)。10 万件で 14 か月分の下部月がスクロールで描画されること・cellMax≤12 を検証。
+- **「+N 件」バッジが狭い月セルでクリップ不可視**(セル `overflowY:auto` 幅 ~50px で 12 件が内側スクロールに隠れ、バッジが可視域外)。→ `cal-more` を月/週モードで `position:sticky; bottom:0`(日モードは static)。スマホ 390px でもセル下端に常時表示、クリックで cap×4 展開(スクショ mob_3/mob_4 で視覚差分確認)。
+
+### 付随修正
+- `OPFS.w` sync ハンドラ経路に **truncate(0)** 追加（旧内容が残骸化し JSON parse 破損する潜在バグ）。`OPFS.ap`（seek 追記）追加。ws_chat 側は追加 API のみで無影響。
+- sweep の期限切れ meta 物理削除は day ファイル行除去（1 件 1 ファイル rmf 廃止）。
+
+### 実測（img-scale・10 万合成 + 実 30 枚、chromium デスクトップ）
+| 項目 | v1.4（試算） | v1.5 実測 |
+|---|---|---|
+| 10 万件ログイン→authed | スマホ 15〜35 分（meta 1 件 1 ファイル） | **4.8 秒**（402 day ファイル + manifest 16MB 1 個） |
+| 定常 heap（metas+manifest+cal） | 10 万件 ~60MB 超 | **49.5MB** |
+| 月窓 DOM（当月 ~7.7 千件） | items 全件 div（6 万ノード級） | **thumb 852**（窓×cap12 に収まる） |
+| 1 件共有時の manifest コスト | 全量 stringify+parse O(N) | **追記 1 行 grew=1**（ap 28ms@4MB・71ms@16MB） |
+| 1024 件リログンスレッドタイム | taskS ~2.0（decode 1024） | **0.4** |
+
+### 既知の未対応（意図的スコープ外）
+- **10 万件部屋の複数ユーザー同期**: M フレームの entriesForM() は manifest 全件（~16MB）→ 対面送信のシャーディング未実装（§7.4 の M ページ機構で分割送信自体は可能だが 10 万規模の実運用検証なし）。单人 1 タブ利用が主対象。
+- 同一日 10 万件の day jsonl 1 個（~16MB）読込は数秒（日内スナップショット+差分圧縮は将来案）。
+- 1024 件/日の月窓スライス順送りは cap により wanted ≤ 窓×cap に縮小（体感改善）が、SliceCache LRU 引き上げは未実施。
+
+## 20. 追加仕様 v1.6: サムネイル正方形 contain と表示サイズピッカー
+
+### 仕様
+- **生成/交換基準 = 128×128 正方形 contain**: `ImgProc.thumb(blob, 128)` は center-crop 廃止。画像**全体が収まる**よう等倍縮小し、短辺側は白レターボックスで中央配置。元画像が 128 満たない場合は**長辺が 128 になるまで拡大**。共有時(`room_app`)・body 遅延生成(`room_calendar.genFromBody`)・シート交換(`sheet_room`)のサムネイルはいずれも 128 基準で生成・保存・交換する。
+- **表示サイズ = 32/64/96/128（既定 64）**: 画面**上部**（モード切替と同じツール行）と**下部**（カレンダーの下）に `32/64/96/128` ピッカーを設け、どちらからでも変更。選択値は `user_settings` に `THUMB_PX` として永続（次回起動時も同一）。2 箇所のピッカーは選択表示(`.on`)が同期する。
+- 表示だけ変える: 基準 128 の画像を CSS 変数 `--ir-thumb` で縮小表示（スライス/シート再生成なし・SliceCache 保持のまま即時切替）。`setThumbPx` で CalView を cellPx(=THUMB_PX+24) 付きで再構築し、セル高さ/プレースホルダ高さも追従。
+
+### 保存形式への影響
+- シートファイル名に基準 px を焼き込む: `rooms/<rid>/sheet/<uid>_<idx>.s128.<h>`。scan 時に px 不一致/旧形式（px なし）のシートは失効として削除し、再生成で新基準版に置換される。
+- 群指紋 `gfp` に基準 px を混入（px 変更でシート再利用ファストパスも失効）。`SHEET_RE` は `^<uid>_<idx>.s<px>.<h>$`。
+
+### テスト（img-spec.mjs に追加・全 8 テスト緑）
+- `szPickers`: 上下 2 箇所 × 4 選択肢。`sz128`/`sz32`: `--ir-thumb` と `.ir-thumb` 実寸と両ピッカーの `.on` 同期。
+- `thumbContain`: 10×40 の小画像 → 128×128 に拡大・辺縁は白・中央は元画像色。
+- `sheetPx128`: 保存シート実寸 = GRID 4×8 × 128 = 512×1024。
+- 実測: 生成サムネイル naturalWidth 全件 128×128（`img_sz_*.png` スクショ: 既定 64 / 32 / 128 選択時）。
+- **混在アスペクト比検証(img-ratio.mjs「RATIO OK」)**: 12 種の別アスペクト比(16:9〜2:3・120px 小画像含む)を共有 → 全サムネイルの表示領域 rect が一致（既定 64×64 正方形）、画像実体は全件 128×128、contain 白帯の比率別確認（横長=上下/縦長=左右/1:1=帯なし）、ピッカー 32/64/128 でも全 12 件の領域が同一正方形に維持。
+- **余白の中央寄せ(v1.6b)**: `.ir-thumb { margin: 2px auto }` で月セル等（ブロック積み）は領域内の余白分だけ中央寄せ。日ビューは flex 横折返し + `justify-content: center` で行全体の左右対称中心がリスト中央と一致（実測 行cx=195=host 中央）。`.ir-thumb img` は `object-fit: contain`。img-ratio の centered 検査で各行 ±1.5px を検証。
+- **付随バグ修正**: (a) 日リストの項目ホスト `display: contents` が Vw.div の attrs 誤指定で無効だった（style 引数に修正、§5.5 の横折返し列が復元）。(b) 月セル/日リストは `overflowY:auto` の内部スクロールで、box の scroll イベントが発火せず下部項目が永久に未実体化になる窓不具合 → CalView `onScroll` でセル/リストの scroll を RoomCalendar.schedulePass に配線。
+
+### 既知の挙動
+- 既存ユーザーの 96 基準シートは起動 scan で削除→次回 rebuild で 128 版に再生成（初回のみ再生成コスト）。
+- contain のため旧 center-crop 版とはサムネイル画が異なる（ハッシュ不変・シートは px 失効で自動再生成）。
+
+## 21. 追加仕様 v1.7: 見出し行ベースの時系列リスト（1 画像 1 枠）
+確定事項（2026-11-10 の追加指示と確認回答で確定）:
+1. **1 画像 1 枠**: 画像は独立スロット（128 基準正方形 contain、§20）として 1 枚 1 枠で横流れ折返し。1 日マスの多重スタックは廃止。
+2. **セクション改行**: 日モードは日毎・週モードは週毎・月モードは月毎にセクション（行）を改行する。
+3. **画像なし**: 今日のセクション 1 個だけ（見出し＝日付のみ、スロットなし）。
+4. **画像あり**: 画像がない「今日以前の最新ユニット」を空セクション（アンカー）として必ず表示。
+5. **飛び飛び画像**: 画像ユニットの隣接（±1）空ユニットのみ表示（長い空白の途中は省略。無限増殖防止）。
+6. **見出し整形**: 基本は YYYY/MM/DD。同一画面内の重複抑止（日モード: 年が変われば YYYY/MM/DD、月が変われば MM/DD、同月なら DD）。
+7. **週モード**: 週毎改行。見出しは週開始日（周日起点）の YYYY/MM/DD のみ。
+8. **月モード**: 月毎改行。見出しは YYYY/MM のみ。
+
+### 実装（cal_view.js v0.2.0 書き換え / virt_list.js 窓修正）
+- `buildSec()`: 画像ユニット + 隣接空 + 直近空アンカーのユニット集合を現在→過去に構築。ユニット算術は `uOf/uShift/uDate`（日=当日 0 時 ms、週=周日 0 時 ms、月=通月番号）。画像なしは `[{今日}]` のみ。
+- ページ = 1 セクション（クラス `cal-cell cal-sec`、日モードは `cal-day` も併記）。見出し `cal-ch` は sticky。項目ホストは `display:contents` の flex wrap / `justify-content:center`（§20 の中央寄せ維持）。cap / 「+N 件」展開（cap×4）は §19 からセクション単位に読み替え。
+- セクション高は全セクション一律 `pgPx()`（ヘッダ + cap 相当の行数。超過はセクション内スクロール、内部 scroll は `onScroll` で窓実体化に配線済 §20）。
+- 見出しの時刻（HH:MM）添付は「当日かつ項目ありかつ日モード」のみ。週/月はラベルを指定書式に限定。
+- 旧 7 列月グリッド・週行・`cal-mh/cal-blank` は削除。`cal-cell` クラスはテスト互換のためセクションにも継続付与。
+- VirtList: rect 基準窓の cur を「最初に見えるページ」下限かつ「ビューポート下端のページを覆う中央位置」に修正（深いスクロールで末尾セクションが窓から漏れ到達不能になる不具合の修正）。
+
+### テスト（img-sec.mjs 新規「SEC OK」+ 既存更新、全 10 テスト）
+- img-sec.mjs: 空部屋=今日 1 セクション（ラベル日付のみ）/ 散在投入（1・2・9・10 日前、5 枚）で日 8 セクション（隣接空のみ表示・4〜7 日前不表示）/ ラベル整形（`2026-11-10 → 09 → 08 → 07 → 02 → 01 → 10/31 → 30`）/ 1 画像 1 枠（scan で 5 スロット重複なし）/ 月 3 セクション `YYYY/MM`（末尾は空月）/ 週 4 セクション（周日開始のフル日付・7 日刻み）。
+- img-mobile.mjs: `bigPageScroll`（セクション化で総高が縮小、scroll 閾値 1500）+ `bigSecBounded`（10 万でもセクション数 ≤17 に有界）。
+
+## 22. 追加仕様 v1.8: 枠線廃止・左寄せ・コントラスト / ゴミ箱絵文字 / 全画面表示とスライドショー
+確定事項（2026-11-10 の追加指示と確認回答で確定）:
+1. **枠線廃止・ヘッダのみ**: サムネイル（`.ir-thumb`）とセクション（`.cal-cell`）のフレームボーダーを廃止し、区切りは見出し（日付）のみ。
+2. **画像の左寄せ**: 画像はセクション内で左詰め（v1.6 §20 の「余白の中央寄せ」は本追加で差し替え。`justify-content: flex-start`、サムネイル margin `2px 4px 2px 0`）。
+3. **日付と背景のコントラスト**: `.cal-ch` をテーマ色で定義（`color: var(--ir-fg)` on `background: var(--ir-bg)`・bold）。旧実装は白背景+明色文字で判読困難だったため CSS クラス管理へ変更。
+4. **ゴミ箱**: ヘッダーのゴミ箱ボタンは絵文字 `🗑️`（title/aria-label は「ゴミ箱」）。ゴミ箱画面の見出しは従来どおり「ゴミ箱」（`btn.trash`）。
+5. **全画面表示ボタン / スライドショーボタン**: ビューアに追加（サイズ行の下）。全画面はモーダルを `ir-fs`（固定全画面オーバーレイ）化 + 可能なら Fullscreen API（best-effort、非対応でもオーバーレイで成立）。
+6. **解除はタップ→コンファーム**: 全画面/slide 中に画像をタップすると「全画面表示を終了しますか？／スライドショーを終了しますか？」をオーバーレイ表示。`続ける` で継続、`終了` でのみ解除（タイマ停止 + ir-fs 除去 + exitFullscreen best-effort）。
+7. **slide は保有画像のみ**: 送り順は meta を持つ非ゴミ箱項目（=`collection.metas` に存在）のみ ts 降順で周回。実体が取得できない項目は送らない。間隔は `SLIDE_MS`（既定 3000ms、ir_const）。
+
+### 実装
+- `css/imgroom.css`: `.ir-thumb` 枠線廃止/margin 左詰め、`.cal-ch` テーマ配色、`.ir-fs/.ir-fsc/.ir-fsp` オーバーレイ。
+- `cal_view.js`: セクション inline 枠線廃止・`flex-start`。
+- `room_app.js`: `slStop/slArm/slNext`（アプリ状態 `_slOn/_slTimer/_slSeq/_fsPend/_slPend`）。slide の送りはビューア差し替え（`viewer()` 再開時に `ir-fs` 自動再開）。ゴミ箱ヘッダは絵文字。
+- `ir_const.js`: `SLIDE_MS: 3000`。
+
+### テスト（img-spec.mjs §22 検査で「SPEC OK」）
+`noFrame`（セクション/サムネイル border 0px）/ `headContrast`（fg/bg 輝度差 ≥0.4）/ `thumbLeftAligned`（最初のスロット左端 = セクション左端 ±6px）/ `trashEmoji`（🗑）/ `trashTitleWord`（ゴミ箱）/ `fsButtons` / `fsOn` / `fsConfirmText` / `fsKeepOn`（続ける）/ `slideFsOn` / `slideAdvance` / `slideHeldOnly`（進んだ画像のファイル名が保有 metas に存在）/ `slideStoppedFsOff` / `slideHalted`（終了後 3.8s 進まない）。img-ratio.mjs は ② を `leftAligned` に更新（RATIO OK）。
+
+## 23. 追加仕様 v1.9: 全画面は画像のみ / QR 表示は QR+情報で終端
+確定事項（2026-11-10 の追加指示と確認回答で確定）:
+1. **全画面表示/slideshow は画像のみ**: `ir-fs` 中はタイトルバー・サイズ行・ボタン行・メタ情報など画像本体と解除コンファーム以外のすべてを非表示（CSS `.ir-fs > :not(.ir-imgwrap):not(.ir-fsc)`）。解除は v1.8 と同様タップ→コンファームのみ。
+2. **コンファーム中の送りポーズ（付随）**: slideshow 中に確認オーバーレイを出している間、送りタイマをポーズし「続ける」で再開（確認中に画像が差し替わり続ける意図が崩れるのを防止）。
+3. **QR 表示は QR+情報で終端**: QR 専用画面のみ適用。作成者の QR(URL)/QR(パスワード) サブタブは従来から QR パネルで終端（変化なし）。部屋メニュー（§5.2 ルームキーメニュー）では QR 欄を最終セクションへ移動（QR とその情報の下に項目を置かない）。サーバーモード参加者の常時 URL QR ブロックの下（共有欄・カレンダー）は維持（QR 専用画面ではない）。
+
+### 実装
+- `css/imgroom.css`: `.ir-fs` 子要素フィルタ（画像のみ）。
+- `room_app.js`: askExit での `_slPaused` ポーズ/再開、roomMenu の QR 欄末尾化。
+
+### テスト（img-spec.mjs 更新で「SPEC OK」）
+`fsOnlyImage`（fs 中は imgwrap 以外非表示・img 幅 100px 超）/ `fsExitByConfirm`（終了でのみ解除）/ `slideConfirmText`（「スライドショーを終了しますか？」）/ `menuQrLast`（メニューの最終セクションが QR 欄で退室ボタンより下）。
+
+## 24. 追加仕様 v2.0: 部屋設定=歯車絵文字 / 日週月の下部タブ統合 / 下部行のコンパクト化
+確定事項（2026-11-10 の追加指示で確定）:
+1. **部屋設定ボタンは歯車絵文字**: ヘッダーの部屋設定（§5.2 ルームキーメニュー）ボタンは `⚙️` のみ。語義は title/aria-label に「部屋設定」を維持（ゴミ箱 🗑️ と同方針）。
+2. **日/週/月の下部タブ統合**: 画面上部のモード切替行（および上部サムネサイズピッカー、v1.6 §20 の 2 箇所運用）を廃止し、RoomCalendar のモードバー（`.ir-calbar`）をサムネイル一覧の直後の下部タブとして統合する。上部→下部の順序は サムネ → 日/週/月タブ → サムネサイズ行。
+3. **サムネサイズはタブの後の改行・コンパクト行**: サムネサイズピッカーは日/週/月タブの次の 1 行（`.ir-botrow`）。行の高さは文字サイズギリギリ（ボタン padding `1px 8px`・`min-height: 0` で既定 40px タップ目標を上書き）、行間の空きは 1px（margin 1px・gap 4px 以内）。
+
+### 実装
+- `css/imgroom.css`: `.ir-calbar`（下部タブ化・行高紧凑）`.ir-calmode`（min-height 0）`.ir-botrow`（行高ギリギリ・行間 1px）。
+- `room_app.js`: 上部 tb 行（モード+ピッカー）廃止。RoomCalendar の bar 要素を下部 `btmTab` へ移設（モードの on 同期は要素ごと移動で維持、`CAL_VIEW` 記録のみ追加リスナで補充）。部屋設定ボタンは ⚙️。
+
+### テスト（img-spec.mjs / img-ratio.mjs 更新で「SPEC OK」「RATIO OK」）
+- `gearEmoji`（⚙）/ `modeTabsBottom`（`.ir-calbar` がカレンダー本体の後・モード 3 ボタンのみ）/ `rowCompact`（タブ・サイズボタンの高さ ≤26px、タブとサイズ行の隙 ≤4px）。`szPickers` は下部 1 箇所×4 に更新。
+- **全画面の異_ratio 実スクショ**（img-ratio ⑥）: 実測 1920×1080（16:9）と 270×480（9:16）を全画面表示し、`fsWide169`/`fsTall916`（画像がビュートポートに収まり aspect 維持 ±4%）と `fsOnlywide/tall`（画像以外の表示要素 0）を検査。スクショ `out/img_ratio_fs_wide.png` / `out/img_ratio_fs_tall.png`。
+
+## 25. 追加仕様 v2.1: 日週月タブとサムネサイズ行は画面左下固定（スマホでも表示）
+確定事項（2026-11-10 の追加指示で確定）:
+1. v2.0 の下部タブ（日/週/月）とサムネサイズ行は、タブレット（広い画面）では見えるが、スマホではカレンダーの後ろ（フロー末尾）に回って見えにくい。→ **スマホでも tablet と同じように表示する**。
+2. **位置は画面左下に固定**: 両行は `.ir-ctrlbar`（`position: fixed; left: 6px; bottom: 6px`）にまとめ、スクロールに依存せず常に左下へ固定する。行構成（タブ→サイズ行、行高ギリギリ・行間 1px）は v2.0 のまま。
+
+### 実装
+- `room_app.js`: btmTab（calbar）と btm（botrow）を `.ir-ctrlbar` の子へ。
+- `css/imgroom.css`: `.ir-ctrlbar`（fixed 左下・z-index 40＝モーダル 99 未満でビューア/全画面には重ならない・背景色つき小箱）。`.ir-main` 下部 padding 64px で固定バーとコンテンツの重なりを回避（デスクトップはカレンダー本体がバー上に伸びない、モバイルは最後までスクロールするとバー下に隠れない）。
+
+### テスト（「SPEC OK」「MOBILE OK」）
+- img-spec `ctrlFixedBottomLeft`（fixed・左 ≦12px・下端 ≦12px・タブ/サイズ行を内包）`ctrlNoOverlap`（カレンダー本体の下端がバー上端まで）。
+- img-mobile `ctrlVisiblePhone`（スマホビューポート 390×844 で固定バーが常時可視・モード 3+サイズ 4 ボタン）。

@@ -152,11 +152,31 @@ export class OPFS {
 		const d = await OPFS.mkFile(p); //Write ArrayBuffer
 		if (d.createSyncAccessHandle) {
 			const h = await d.createSyncAccessHandle();
+			h.truncate(0); //旧内容を必ず消す（truncate 無しは上書き後尾に残骸残り→JSON 破損の原因）
 			h.write(ab, OPFS.at0);
 			h.flush();
 			h.close();
 		} else {
 			const h = await d.createWritable();
+			await h.write(ab);
+			await h.close();
+		}
+		return p;
+	};
+	// 追記（jsonl 差分ログ用）。既存末尾へ seek/write で足す。既存無ければ新規作成。
+	static ap = async (p, ab) => {
+		await OPFS.rd;
+		const d = await OPFS.mkFile(p);
+		if (d.createSyncAccessHandle) {
+			const h = await d.createSyncAccessHandle();
+			const n = h.getSize();
+			h.write(ab, { at: n });
+			h.flush();
+			h.close();
+		} else {
+			const f = await d.getFile(),
+				h = await d.createWritable({ keepExistingData: true });
+			await h.seek(f.size);
 			await h.write(ab);
 			await h.close();
 		}

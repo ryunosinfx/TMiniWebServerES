@@ -17,7 +17,10 @@ export const te = new TextEncoder('utf-8'),
 	isStr = s => typeof s === 'string',
 	isArr = a => Array.isArray(a),
 	cb = a => a,
-	io = (...a) => console.info(a),
+	// OPFS 等の高頻度 info ログ: デフォルト無効（1024 枚運用で数千件/回の console.info が
+	// CPU/メモリ負荷・DevTools 接続時の保持増長の原因になるため）。デバッグ時は
+	// グローバル `__IRLOG = true` で有効化。warn/err は常に有効。
+	io = (...a) => (globalThis.__IRLOG ? console.info(a) : E),
 	w = (...a) => console.warn(a),
 	err = (...a) => console.error(a),
 	ef = (e, id = E, l = N) => {

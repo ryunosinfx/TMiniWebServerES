@@ -25,7 +25,7 @@ const MAX_FRAME = 15000;
 const CHUNK_RE = /^~([\w-]{20,})\.(\d+)\.(\d+)\.([\w-]*)$/; // `~h.i.c.r`
 
 export class FileTransfer {
-	constructor({ send, cfg = {}, uid = E } = {}) {
+	constructor({ send, cfg = {}, uid = E, gHoldMs = 0 } = {}) {
 		this.send = isFn(send) ? send : () => cb(err('p2p_file: transport(send) 未注入'), F); // transport 注入（broadcast 前提・WebSocket 非依存）
 		this.uid = uid; // 自分の uid（Q/H/A/G は to 宛先。自宛でなければ feed は false を返し呼び出し側ルータへ）
 		this.cfg = { ...DEF_CFG, ...cfg };
@@ -40,6 +40,7 @@ export class FileTransfer {
 		this.in = new Map(); // 受信転送 h10 -> {v:chunk bitmap,...}（§8.5.1 既知転送でなければ chunk 破棄）
 		this.out = new Map(); // 送信中 h10 -> {chunks,...}
 		this.outDone = new Map(); // 送信完了（G 再送に備え chunks を暫定保持）
+		this.gHoldMs = gHoldMs > 0 ? gHoldMs : 30000; // 保持時間（サーバーモードは短縮、低メモリ化 v1.3）
 		this.rr = new Map(); // h10 -> holder ラウンドロビン索引（§9.3.2/§9.4）
 		this.busyOut = 0; // 同時送信数（OUT_TRANSFERS 上限、超過は busy 応答 §8.6）
 		this.active = 0; // 同時取得数（IN_TRANSFERS 上限）
@@ -265,7 +266,7 @@ export class FileTransfer {
 		this.busyOut--;
 		// G 再送に備え chunks を暫定保持（§9.3.4）
 		this.outDone.set(tp.k, { chunks: tp.chunks, at: now() });
-		this._w(() => this.outDone.delete(tp.k), this.cfg.STALL_MS * 3);
+		this._w(() => this.outDone.delete(tp.k), this.gHoldMs);
 	}
 	async _onG(o, fromUid) {
 		const k = FileTransfer.ok(o.h, fromUid),

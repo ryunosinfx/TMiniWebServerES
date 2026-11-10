@@ -5,7 +5,7 @@
 // Blob のダウンロード（<a download>）は呼び出し側の責務。ここでは onPart で blob を渡すだけ。
 import { ZipBuilder } from '../zip.js';
 import { CFG } from './ir_const.js';
-import { Y } from '../../Y.js';
+import { Y, ef } from '../../Y.js';
 
 // 拡張子が無い時に meta.t（MIME）から補う小マップ（§9.10）
 const EXT = {
@@ -92,7 +92,7 @@ export class BulkDL {
 				zb = new ZipBuilder();
 				held = 0;
 				acc = 0;
-				if (onPart) await onPart(blob, part, totalEstimate);
+				if (onPart) await onPart({ name: this.zipName(part), blob }, totalEstimate);
 			};
 			for (const c of cand) {
 				// meta は roomItems 実装が持つ前提。無ければ HashStore.metaGet（未実装なら null 扱い）
@@ -106,7 +106,7 @@ export class BulkDL {
 				try {
 					ab = await this.store.get(c.h10);
 				} catch (e) {
-					Y.ef(e, 'bulkdl.get ' + c.h10);
+					ef(e, 'bulkdl.get ' + c.h10);
 				}
 				if (!ab || !ab.byteLength) {
 					skipped++;
@@ -123,7 +123,7 @@ export class BulkDL {
 			}
 			await flush();
 		} catch (e) {
-			Y.ef(e, 'bulkdl.run'); // ログしてから呼び出し側へ伝搬（暗黙の握りつぶし禁止）
+			ef(e, 'bulkdl.run'); // ログしてから呼び出し側へ伝搬（暗黙の握りつぶし禁止）
 			throw e;
 		}
 		return { files, count, skipped };
@@ -135,7 +135,7 @@ export class BulkDL {
 			try {
 				return !!(await this.store.has(h10));
 			} catch (e) {
-				Y.ef(e, 'bulkdl.has ' + h10);
+				ef(e, 'bulkdl.has ' + h10);
 				return false;
 			}
 		}
@@ -143,6 +143,10 @@ export class BulkDL {
 	}
 
 	// 見積り用の元サイズ（meta.l。不明時は共有上限を仮定）
+	// 投稿時刻（並び順と見積り用。meta 欠損は 0）
+	tsOf(meta) {
+		return (meta && meta.ts) || 0;
+	}
 	sizeOf(meta) {
 		const l = meta && meta.l;
 		return Number.isFinite(l) && l > 0 ? l : this.cfg.MAX_IMG_BYTES || CFG.MAX_IMG_BYTES;
@@ -164,7 +168,7 @@ export class BulkDL {
 			try {
 				n = Y.u2s(Y.U2u(raw));
 			} catch (e) {
-				Y.ef(e, 'bulkdl.name ' + h10);
+				ef(e, 'bulkdl.name ' + h10);
 			}
 		}
 		// パス区切り（/ \）は.flat 構造を保つため最後の要素だけ採用（ZIP 名の区切りは常に /）

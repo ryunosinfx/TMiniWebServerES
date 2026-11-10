@@ -18,7 +18,7 @@ import { ImgProc, SliceCache } from '../img_proc.js';
 import { CFG, IR, STORAGE } from './ir_const.js';
 
 const MAX_M = 64; // §8.4 M ページ上限（エントリ数）
-const SHEET_RE = /^(.*)_(\d+)\.([A-Za-z0-9_-]{8,})$/; // <uid>_<idx>.<h10>
+const SHEET_RE = /^(.*)_(\d+)\.s(\d+)\.([A-Za-z0-9_-]{8,})$/; // <uid>_<idx>.s<px>.<h10>（v1.6 §20: 基準 px 焼込み）
 const isFn = v => typeof v === 'function';
 
 export class SheetRoom {
@@ -38,6 +38,7 @@ export class SheetRoom {
 
 		this.slices = new SliceCache(); // `${uid}.${idx}.${p}` -> objectURL（表示用併用）
 		this.index = new Map(); // `${uid}.${idx}` -> {uid, idx, h, total}
+		this._gfp = new Map(); // idx -> [fp, h]（v1.5 §19 群指紋。scan で sheetidx 読込、rebuild で書換）
 		this.placed = new Map(); // 自 h10 -> {sid, p}（§7.4 m の sid/p 補完用）
 		this.thumbs = new Map(); // h10 -> Blob（collage 入力。SliceCache 併用のサムネイル）
 		this.cells = new Map(); // `${uid}.${idx}` -> Blob[]（row-major 32）
@@ -159,9 +160,25 @@ export class SheetRoom {
 		for (const e of list) {
 			if (!e || e.s === undefined) continue; // ディレクトリ要素は無視（HashStore.isf と同じ判定）
 			const m = SHEET_RE.exec(e.k || E);
-			if (!m) continue;
+			if (!m) {
+				// v1.6 §20: 旧形式（px 無し）や基準 px 不一致のシートは失効→削除（再生成で新 px 版に置換）
+				try {
+					await OPFS.rmf(`${dir}/${e.k}`);
+				} catch (er) { /* 消えない分は放置 */ }
+				continue;
+			}
 			const idx = +m[2];
-			this.index.set(`${m[1]}.${idx}`, { uid: m[1], idx, h: m[3], total: this._per() });
+			this.index.set(`${m[1]}.${idx}`, { uid: m[1], idx, h: m[4], total: this._per() });
+		}
+		// v1.5 §19: 群指紋（sheetidx）読込。rebuild 側で manifest membership が一致した群は collage 再計算を省略する
+		try {
+			const p = STORAGE.sheetIdx(this.rid, this.uid);
+			if (await OPFS.isEf(p)) {
+				const arr = JSON.parse(Y.u2s(await OPFS.r(p)));
+				if (Array.isArray(arr)) for (const r of arr) if (Array.isArray(r) && r.length >= 3) this._gfp.set(+r[0], [r[1], r[2]]);
+			}
+		} catch (e) {
+			cb(w('sheet_room: sheetIdx 読込失敗', e && e.message));
 		}
 		return this.index;
 	}
@@ -174,11 +191,29 @@ export class SheetRoom {
 		if (h10 && blob) this.thumbs.set(h10, blob);
 	}
 
+	// 自タブ実在の本体 h10 集合を ls 1 回で（v1.5 §19。rebuild の存在確認を Map 参照へ）
+	async _bodySet() {
+		const s = new Set();
+		try {
+			for (const e of await OPFS.ls('bodies')) if (e && e.s !== undefined) s.add(e.k);
+		} catch (e) {
+			cb(w('sheet_room: bodies ls 失敗', e && e.message));
+		}
+		return s;
+	}
+	// 群 manifest 指紋: h10+ts の順序列ハッシュ+基準 px（v1.6 §20）。一致群は保存シートを再利用（v1.5 §19）
+	async gfp(grp) {
+		try {
+			return Y.B2U(await H.d(Y.s2u(grp.map(e => e.h + ':' + (Number(e.ts) || 0)).join('|') + ':px' + (Number(this.cfg.THUMB_BASE_PX) || 96)), 1));
+		} catch (e) {
+			return E;
+		}
+	}
 	// ---- §9.2.1/2 シート再生成 ----
 	// entries: §7.4 m と同形の manifest エントリ配列（h, ts, …）。ts 降順 → 32 コマ/シート。
 	async rebuild(entries) {
 		if (this.dead) return;
-		const cols = this.cfg.GRID_COLS, rows = this.cfg.GRID_ROWS, per = this._per(), px = this.cfg.THUMB_PX;
+		const cols = this.cfg.GRID_COLS, rows = this.cfg.GRID_ROWS, per = this._per(), px = this.cfg.THUMB_BASE_PX || 96; // v1.6 §20: シートコマは基準 128
 		const uniq = [];
 		const seen = new Set();
 		for (const e of [...(entries || [])].sort((a, b) => ((b && b.ts) || 0) - ((a && a.ts) || 0))) {
@@ -191,12 +226,36 @@ export class SheetRoom {
 		const prev = this.index;
 		const next = new Map();
 		const changed = [];
+		const gRows = []; // 保存する群指紋行 [idx, fp, h, total]（v1.5 §19）
+		let have = N; // 本体存在判定の遅延セット（初 miss で ls 1 回。10 万 miss × isEf 0.7ms を回避）
 		for (let i = 0; i < uniq.length || (i === 0 && !uniq.length); i += per) {
 			const grp = uniq.slice(i, i + per);
 			const idx = i / per;
 			if (!grp.length) break;
+			const fp = await this.gfp(grp);
+			const rec = this.index.get(`${this.uid}.${idx}`);
+			const saved = this._gfp.get(idx);
+			if (rec && saved && saved[0] === fp && saved[1] === rec.h) {
+				// 高速パス: 群の membership 不変かつ保存シート実在 → decode/collage 無しで索引だけ復元（10 万件起動の秒化）
+				next.set(`${this.uid}.${idx}`, { uid: this.uid, idx, h: rec.h, total: grp.length });
+				gRows.push([idx, fp, rec.h, grp.length]);
+				const sid0 = `${this.rid}.${this.uid}.${idx}`;
+				grp.forEach((e, k) => this.placed.set(e.h, { sid: sid0, p: k }));
+				continue;
+			}
 			const cells = [];
-			for (const e of grp) cells.push(await this._thumbOf(e.h)); // 欠損セルは白（collage が null スキップ）
+			for (const e of grp) {
+				const t = this.thumbs.get(e.h);
+				if (t) {
+					cells.push(t);
+					continue;
+				}
+				if (this.store && isFn(this.store.get)) {
+					if (!have) have = await this._bodySet();
+					if (have.has(e.h)) cells.push(await this._thumbOf(e.h)); // 自タブ実在のみ decode（欠損セルは白）
+				}
+			}
+			if (!cells.some(Boolean)) continue; // v1.5 §19: 全コマ未所持の空シートは生成しない（10 万件で数千の白 collage + sheets イベント嵐防止。末尾掃除で旧も除去）
 			const sheetBlob = await this.ip.collage(cells, cols, rows, px, this.cfg.SHEET_Q);
 			const ab = await this.ip.blob2ab(sheetBlob);
 			const h = Y.B2U(await H.d(B.u8(ab), this.cfg.HASH_ROUNDS)); // h10（HashStore.put と同一手順）
@@ -213,6 +272,7 @@ export class SheetRoom {
 			this._dropCells(this.uid, idx);
 			this.cells.set(`${this.uid}.${idx}`, cells.slice(0, per)); // 自シートはセルをそのまま再利用
 			this._emit('sheets', this.uid, idx, cells.slice(0, per));
+			gRows.push([idx, fp, h, grp.length]);
 		}
 		// 枚数減少で消えた末尾シートを掃除
 		for (const [k, old] of prev) {
@@ -221,6 +281,18 @@ export class SheetRoom {
 			this._dropCells(old.uid, old.idx);
 		}
 		this.index = next;
+		// 群指紋保存（次回起動の高速パス用。10 万件でも 2〜3 千行の小型 JSON）
+		try {
+			await OPFS.w(STORAGE.sheetIdx(this.rid, this.uid), Y.s2u(JSON.stringify(gRows)));
+			this._gfp = new Map(gRows.map(r => [r[0], [r[1], r[2]]]));
+		} catch (e) {
+			cb(w('sheet_room: sheetIdx 書換失敗', e && e.message));
+		}
+		// v1.3.1 H1: thumbs は現 manifest 分のみ保持（投稿入替・削除での無制限成長防止）
+		if (this.thumbs.size) {
+			const keep = new Set(uniq.map(e => e.h));
+			for (const h of [...this.thumbs.keys()]) if (!keep.has(h)) this.thumbs.delete(h);
+		}
 		this._emit('index', [...next.values()]);
 		this.queueBroadcast(changed); // §9.2.3 変更のあったシートのみ再配布（§8.6 スロットル）
 	}
@@ -231,7 +303,7 @@ export class SheetRoom {
 		try {
 			const ab = await this.store.get(h);
 			if (!ab) return N;
-			const b = await (isFn(this.ip.thumb) ? this.ip.thumb(ImgProc.ab2blob(ab, this.cfg.SHEET_FMT), this.cfg.THUMB_PX) : N);
+			const b = await (isFn(this.ip.thumb) ? this.ip.thumb(ImgProc.ab2blob(ab, this.cfg.SHEET_FMT), this.cfg.THUMB_BASE_PX || 96) : N);
 			if (b) this.thumbs.set(h, b);
 			return b || N;
 		} catch (e) {
@@ -431,7 +503,7 @@ export class SheetRoom {
 		const p = STORAGE.sheet(this.rid, uid, idx, rec.h);
 		if (!(await OPFS.isEf(p))) return [];
 		const ab = await OPFS.r(p);
-		const blobs = await this.ip.slice(ImgProc.ab2blob(ab, this.cfg.SHEET_FMT), cols, rows, this.cfg.THUMB_PX, this.cfg.SHEET_Q);
+		const blobs = await this.ip.slice(ImgProc.ab2blob(ab, this.cfg.SHEET_FMT), cols, rows, this.cfg.THUMB_BASE_PX || 96, this.cfg.SHEET_Q);
 		this.cells.set(`${uid}.${idx}`, blobs);
 		return blobs;
 	}

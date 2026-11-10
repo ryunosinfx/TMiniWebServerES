@@ -6,7 +6,11 @@ import { Y, H } from '../../Y.js';
 export const CFG = {
 	GRID_COLS: 4,
 	GRID_ROWS: 8,
-	THUMB_PX: 96,
+	SLIDE_MS: 3000, // v1.8 §22: スライドショーの 1 枚あたり表示 ms
+
+	THUMB_PX: 64, // 表示サイズ（v1.6 §20: ピッカーで 32/64/96/128 選択可・user_settings 永続）
+	THUMB_BASE_PX: 128, // サムネイル生成・交換・シートコマの基準一辺（v1.6 §20: contain 正方形。小さい画像は長辺 128 まで拡大）
+	THUMB_OPTS: [32, 64, 96, 128], // 表示サイズ選択肢（画面上部/下部ピッカー）
 	SHEET_FMT: 'image/jpeg',
 	SHEET_Q: 0.72,
 	CHUNK_RAW: 8192,
@@ -20,8 +24,20 @@ export const CFG = {
 	SHEET_JITTER_MS: 10000,
 	TRASH_KEEP_DAYS: 30,
 	ZIP_CHUNK_MB: 10,
+	// 一時退避（追加仕様 v1.3 §15.8）
+	HIBER_AFTER_MS: 12 * 3600 * 1000, // 12h 超で退避→リロード
+	HIBER_TTL_MS: 5 * 60 * 1000, // 退避条目の有効期間（5 分）
+	HIBER_CHECK_MS: 60 * 1000,
+	HIBER_WAIT_MAX_MS: 5 * 60 * 1000, // 安全点待ち上限（超過で強制）
+	HIBER_JITTER_MS: 30 * 1000, // 複数タブの同時リロードずらし
+	// サーバーモード低メモリ化（追加仕様 v1.3）
+	CELL_CAP: 12, // セル/日あたり初期表示上限（v1.5 §19。『+N 件』で cap×4 ずつ展開）
+	SCACHE_MAX: 64, // objectURL/base64 スライスキャッシュ上限（通常）
+	SRV_SCACHE_MAX: 8, // サーバーモードは厳しめ
+	G_HOLD_MS: 30000, // 送信完了 chunks の G 再送保持（通常）
+	SRV_G_HOLD_MS: 10000, // サーバーモードは供給数が多いため短縮
 	CAL_WINDOW_PAGES: 3,
-	MAX_IMG_BYTES: 2 * 1024 * 1024,
+	MAX_IMG_BYTES: 10 * 1024 * 1024, // 単一画像上限の既定(10MB)。部屋作成時に room.mx(bytes) で上書き可(§追加仕様)
 	HASH_ROUNDS: 10,
 	PW_BITS: 512,
 	CAL_VIEW: 'month',
@@ -61,8 +77,9 @@ export const STORAGE = {
 	manifest: (rid, uid) => `rooms/${rid}/manifest.${uid}.json`,
 	history: rid => `rooms/${rid}/history.json`,
 	autodl: rid => `rooms/${rid}/autodl.json`,
-	sheet: (rid, uid, idx, h) => `rooms/${rid}/sheet/${uid}_${idx}.${h}`,
+	sheet: (rid, uid, idx, h) => `rooms/${rid}/sheet/${uid}_${idx}.s${CFG.THUMB_BASE_PX || 96}.${h}`, // v1.6 §20: 基準 px を文件名に焼き込み（px 変更で旧シート失効）
 	sheetDir: rid => `rooms/${rid}/sheet`,
+	sheetIdx: (rid, uid) => `rooms/${rid}/sheetidx.${uid}.json`, // 群指紋（v1.5 §19: 起動時 collage 再計算スキップ判定）
 };
 
 // 仕様 §7.3:

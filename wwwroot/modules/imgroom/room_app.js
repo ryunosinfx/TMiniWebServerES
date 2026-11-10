@@ -18,6 +18,7 @@ import { Toggle, Badge, Toast, useLabel } from '../widgets.js';
 import { CFG, STORAGE, ridOf, qrPack, qrUnpack, IR } from './ir_const.js';
 import { Protocol } from './ir_protocol.js';
 import { RoomSession } from './room_session.js';
+import { Hibernate } from './hibernate.js';
 import { Collection } from './collection.js';
 import { SheetRoom } from './sheet_room.js';
 import { SyncMode } from './sync_mode.js';
@@ -60,15 +61,29 @@ export class RoomApp {
 		this.store = new HashStore(this.cfg); // cfg 確定後に生成（HASH_ROUNDS 反映）
 		await I18N.init((AppSettings.cfg && AppSettings.cfg.LANG) || 'auto');
 		I18N.onChange = () => this.redraw(); // §11 言語変更で全 UI 即時再描画
-		this.mkCss();
+		this.setCssVars();
 		this.mkShell();
 		this.sweepOnce(); // §9.8 起動時スイープ（lastSweep 判定）
-		const h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
-		if (h) await this.homeLogin(h); // §5.1 hash=部屋名 b64url → ログイン画面
-		else await this.home();
-		this.autoJoin(); // §5.7 サーバーモードは起動時に自動再参加
 		Vw.ael(window, 'beforeunload', () => AppSettings.flush()); // §11 書き戻し flush
+		// 一時退避（追加仕様 v1.3 §15.8）: リロード後は localStorage の退避条目（5 分以内）から自動復帰
+		this.hib = new Hibernate(this, this.cfg);
+		const hr = await this.hib.restore();
+		if (!(hr && hr.rid && (await this.tryResume(hr)))) {
+			const h = RoomApp.hashName(); // v1.3.1: 不正 % での boot 停止防止
+			if (h) await this.homeLogin(h); // §5.1 hash=部屋名 b64url → ログイン画面
+			else await this.home();
+			this.autoJoin(); // §5.7 サーバーモードは起動時に自動再参加
+		}
+		this.hib.arm(); // 12h 経過で安全点を見て退避→リロード（全タブ各自）
 		if (!this.opfsOk) Toast(t('msg.opfs.unavail'));
+	}
+	// ハッシュの部屋名（b64url）。不正 % シーケンスでも落ちない（v1.3.1）
+	static hashName() {
+		try {
+			return decodeURIComponent((location.hash || '').replace(/^#/, ''));
+		} catch (e) {
+			return '';
+		}
 	}
 	qOverride() { // §11: GRID_COLS/GRID_ROWS/CAL_VIEW のみ（デバッグ用・永続化しない）
 		let p;
@@ -119,40 +134,9 @@ export class RoomApp {
 			ef(e, 'room_app.dl');
 		}
 	}
-	// ---- CSS（最小・クラス prefix ir-、モバイル縦一列想定）----
-	mkCss() {
-		if (Vw.gi('ir-css')) return;
-		const s = Vw.ce('style');
-		s.id = 'ir-css';
-		s.textContent = `
-body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-serif}
-.ir-hd{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #2c333d}
-.ir-hd b{font-size:15px}
-.ir-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:6px 10px;border-bottom:1px solid #2c333d}
-.ir-tab{display:inline-flex;gap:6px;align-items:center;padding:9px 12px;border:1px solid #2c333d;border-radius:8px;background:#20262e;color:#e8ecf2;font:inherit;min-height:40px}
-.ir-tab.on{background:#3d7dd8;border-color:#3d7dd8}
-.ir-btn{padding:9px 13px;border:1px solid #2c333d;border-radius:8px;background:#242b34;color:#e8ecf2;font:inherit;min-height:40px}
-.ir-btn.warn{background:#6a2b2b}
-.ir-btn.on{background:#2b6b3a}
-.ir-main{padding:10px;max-width:1100px;margin:0 auto}
-.ir-frm{display:flex;flex-direction:column;gap:10px;max-width:560px}
-.ir-frm label{display:flex;flex-direction:column;gap:4px;color:#9aa6b2}
-.ir-frm input,.ir-frm select,.ir-frm textarea{padding:10px;border:1px solid #2c333d;border-radius:8px;background:#11151a;color:#e8ecf2;font:inherit;min-height:42px}
-.ir-crd{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;border:1px solid #2c333d;border-radius:10px;margin-bottom:8px}
-.ir-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.ir-bdg{display:inline-block;padding:2px 7px;border-radius:9px;font-size:12px;background:#31415a}
-.ir-bdgon{display:inline-block;padding:2px 7px;border-radius:9px;font-size:12px;background:#2b6b3a}
-.ir-bdgoff{display:inline-block;padding:2px 7px;border-radius:9px;font-size:12px;background:#5b2f2f}
-.ir-sec{margin:10px 0;padding:8px 10px;border:1px solid #2c333d;border-radius:10px}
-.ir-sec h4{margin:2px 0 6px;font-size:13px;color:#9aa6b2}
-.ir-mdl{position:fixed;inset:0;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;z-index:99;padding:10px}
-.ir-mbx{background:#1d232b;border:1px solid #2c333d;border-radius:12px;padding:12px;max-width:min(680px,100%);max-height:92%;overflow:auto;width:100%}
-.ir-tr{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid #2c333d;padding:8px 0}
-.ir-mut{color:#9aa6b2;font-size:12px}
-.ir-img{max-width:100%;max-height:60vh;display:block;margin:6px 0}
-.ir-rd{display:inline-flex;gap:4px;align-items:center;padding:8px 10px;border:1px solid #2c333d;border-radius:8px;min-height:40px}
-`;
-		Vw.gB().appendChild(s);
+	// ---- CSS 変数注入（寸法等の設定値のみ。色/造形は css/imgroom.css のテーマ変数で差し替え可）----
+	setCssVars() {
+		document.documentElement.style.setProperty('--ir-thumb', (this.cfg.THUMB_PX || 96) + 'px');
 	}
 	// ---- シェル（ヘッダー+タブ+メイン、§5.2）----
 	mkShell() {
@@ -167,8 +151,7 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		e.lblN = Vw.add(e.modeWrap, 'span', { class: 'ir-mut' });
 		e.tgl = Toggle({ parent: e.modeWrap, label: '', onChange: on => this.setMode(on) });
 		e.lblS = Vw.add(e.modeWrap, 'span', { class: 'ir-mut' });
-		e.lang = Vw.add(this.hd, 'select'); // 言語 auto/ja/en
-		Vw.sS(e.lang, { padding: '8px', background: '#11151a', color: '#e8ecf2', border: '1px solid #2c333d', borderRadius: '8px', minHeight: '40px' });
+		e.lang = Vw.add(this.hd, 'select', { class: 'ir-langs' }); // 言語 auto/ja/en
 		for (const v of ['auto', 'ja', 'en']) {
 			const o = Vw.ce('option');
 			o.value = v;
@@ -196,9 +179,13 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		opts[1].textContent = t('hdr.lang') + ': 日本語';
 		opts[2].textContent = t('hdr.lang') + ': English';
 		e.lang.value = (AppSettings.cfg && AppSettings.cfg.LANG) || 'auto';
-		Vw.sT(e.trash, t('btn.trash'));
+		Vw.sT(e.trash, t('btn.trash.ico')); // v1.8 §22: ゴミ箱は絵文字ボタン（画面側の見出しは t('btn.trash')='ゴミ箱' を維持）
+		e.trash.title = t('btn.trash');
+		e.trash.setAttribute('aria-label', t('btn.trash'));
 		Vw.sT(e.bulk, t('btn.bulkdl'));
-		Vw.sT(e.menu, t('btn.room.menu'));
+		Vw.sT(e.menu, '⚙️'); // v2.0 §24: 部屋設定は歯車絵文字（title/aria に語義維持）
+		e.menu.title = t('btn.room.menu');
+		e.menu.setAttribute('aria-label', t('btn.room.menu'));
 		Vw.sT(e.logout, t('btn.logout'));
 	}
 	setLang(v) { // §5.2: LANG 保存 + I18N 切替（onChange→redraw）
@@ -456,6 +443,10 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		const nmIn = Vw.ipt(f, { type: 'text', name: 'ir-cn', placeholder: t('lbl.room.name') });
 		const uidIn = Vw.ipt(f, { type: 'text', name: 'ir-cuid', placeholder: t('lbl.username') });
 		const pwIn = Vw.ipt(f, { type: 'text', name: 'ir-cpw', placeholder: t('lbl.password') });
+		const mxRow = Vw.div(f, { class: 'ir-row' }); // 追加仕様: 単一画像上限（既定 10MB・作成時に変更可）
+		Vw.add(mxRow, 'span', { class: 'ir-mut' }).textContent = t('lbl.maxmb');
+		const mxIn = Vw.ipt(mxRow, { type: 'number', name: 'ir-cmx', min: '1', max: '200', step: '1' });
+		mxIn.value = String(Math.max(1, Math.round((this.cfg.MAX_IMG_BYTES || 10485760) / 1048576)));
 		const row = Vw.div(f, { class: 'ir-row' });
 		const gen = Vw.btn(row, { class: 'ir-btn' }); // 自動生成（512bit b64url）
 		Vw.sT(gen, t('btn.pw.auto'));
@@ -484,7 +475,8 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 				this.loginForm(rid, await this.readRoom(rid));
 				return;
 			}
-			await this.doCreate({ rid, nb, nmRaw, uid, pw, xorig: xo.get() });
+			const mx = Math.min(200, Math.max(1, parseInt(mxIn.value, 10) || 10)) * 1048576;
+			await this.doCreate({ rid, nb, nmRaw, uid, pw, xorig: xo.get(), mx });
 		});
 	}
 	async roomExists(rid) {
@@ -503,11 +495,11 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 			return null;
 		}
 	}
-	async doCreate({ rid, nb, nmRaw, uid, pw, xorig }) {
+	async doCreate({ rid, nb, nmRaw, uid, pw, xorig, mx = 0 }) {
 		// 作成者は room.json に seed を保管 → session.login の初回採決不要ショートカット（§5.3/§6.2）
 		const salt = AuthChallenge.saltNormal();
 		const seed = await AuthChallenge.seed(pw, nb, location.origin, salt, this.cfg.HASH_ROUNDS);
-		const room = { rid, nm: nb, pw: seed, pwSalt: salt, srvOn: false, cr: uid, cg: Date.now(), xorig: !!xorig, oa: [] };
+		const room = { rid, nm: nb, pw: seed, pwSalt: salt, srvOn: false, cr: uid, cg: Date.now(), xorig: !!xorig, oa: [], mx: +mx || 0 };
 		await OPFS.w(STORAGE.roomFile(rid), Y.s2u(JSON.stringify(room)).buffer);
 		const ctx = await this.openRoom({ rid, nb, room, uid, mode: 'normal' });
 		ctx.plainPw = pw; // QR 表示用（平文はセッション中のみ保持）
@@ -532,29 +524,33 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		const cam = Vw.btn(box, { class: 'ir-btn' });
 		Vw.sT(cam, t('btn.scan'));
 		const done = data => {
-			boxClose();
+			box._close(); // H4: dlg.close() 経由（keydown 解除+_onClose 発火）
 			onFound(data);
 		};
 		let stop = null;
-		const boxClose = () => {
-			if (stop) try {
-				stop();
-			} catch (e) { /* stop 失敗無視 */ }
-			Vw.rm(box._mdl);
-		};
-		if (QRScan.canCamera()) {
-			const r = QRScan.camera(done);
-			if (r && r.stop) stop = r.stop;
-			else {
+		// v1.3.1 H3: camera は async（Promise）。stop を確実に保持し、閉じ経路（☓/Esc/背景/done）全てで停止させる
+		const startCam = () => {
+			if (stop) return; // 起動済み
+			QRScan.camera(done).then(r => {
+				if (r && r.stop) stop = r.stop;
+				else {
+					Vw.sS(cam, { display: 'none' });
+					Toast(t('msg.scan.cameraUnavail')); // §12/§5.4 フォールバック UI
+				}
+			}, () => {
 				Vw.sS(cam, { display: 'none' });
-				Toast(t('msg.scan.cameraUnavail')); // §12/§5.4 フォールバック UI
-			}
-		} else Vw.sS(cam, { display: 'none' });
-		Vw.click(cam, () => {
-			const r = QRScan.camera(done);
-			if (r && r.stop) stop = r.stop;
-			else Toast(t('msg.scan.cameraUnavail'));
-		});
+				Toast(t('msg.scan.cameraUnavail'));
+			});
+		};
+		box._onClose = () => {
+			if (stop) try {
+				stop(); // カメラ・rAF ループの停止（getUserMedia track も qr_scan 側 stop で解放）
+			} catch (e) { /* stop 失敗無視 */ }
+			stop = null;
+		};
+		if (QRScan.canCamera()) startCam();
+		else Vw.sS(cam, { display: 'none' });
+		Vw.click(cam, startCam);
 		const fi = Vw.ipt(box, { type: 'file', accept: 'image/*' }); // PNG/JPG ファイル復号
 		Vw.change(fi, async () => {
 			const f = fi.files && fi.files[0];
@@ -571,13 +567,27 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 			if (s) done(s);
 		});
 	}
-	dlg(title) { // 共通モーダル（body 直下。戻り値は .ir-mbx、閉じるは _mdl 除去）
+	dlg(title) { // 共通モーダル（☓ 右上・Esc・背景クリックで閉じる。bx._close で程序から閉じ可）
 		const mdl = Vw.add(Vw.gB(), 'div', { class: 'ir-mdl' });
 		const bx = Vw.div(mdl, { class: 'ir-mbx' });
-		Vw.add(bx, 'h3').textContent = title;
+		const hd = Vw.div(bx, { class: 'ir-mhd' });
+		Vw.add(hd, 'h3').textContent = title;
+		const x = Vw.btn(hd, { class: 'ir-mclose', title: t('btn.close'), 'aria-label': t('btn.close') }); // ☓ 右上（追加仕様）
+		x.textContent = '✕';
+		const onKey = ev => {
+			if (ev.key === 'Escape') close();
+		};
+		const close = () => {
+			Vw.rel(document, 'keydown', onKey);
+			Vw.rm(mdl);
+			if (bx._onClose) bx._onClose(); // 呼び出し側後始末（ビューア単一化など）
+		};
+		Vw.ael(document, 'keydown', onKey);
+		Vw.click(x, close);
 		bx._mdl = mdl;
+		bx._close = close;
 		Vw.click(mdl, ev => {
-			if (ev.target === mdl) Vw.rm(mdl);
+			if (ev.target === mdl) close();
 		});
 		return bx;
 	}
@@ -586,6 +596,7 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		const st = (AppSettings.state && AppSettings.state.roomLogin) || {};
 		for (const rid of Object.keys(st)) {
 			const rl = st[rid];
+			if (this.rooms.has(rid)) continue; // 退避復帰等で既にセッション済み
 			if (!rl || (AppSettings.state['MODE.' + rid] || (AppSettings.state.MODE || {})[rid]) !== 'server') continue;
 			const room = await this.readRoom(rid);
 			if (!room || room.conflict || !(room.srvOn === true || room.srvOn === 'true')) continue; // §6.8 未許可は自動ログインしない
@@ -599,16 +610,55 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 			}
 		}
 	}
+	// ---- 一時退避（追加仕様 v1.3 §15.8）----
+	hibernateState() { // 退避時に暗号化保存する一時情報（平文 pw は保持しているタブのみ）
+		const ctx = this.activeCtx();
+		return ctx ? { rid: ctx.rid, nb: ctx.nb, uid: ctx.uid, mode: ctx.mode, pw: ctx.plainPw || '' } : { rid: '' };
+	}
+	hibernateSafe() { // 退避して良いか（転送/共有/モーダル操作が進行中なら延期）
+		if (document.querySelector('.ir-mdl')) return false;
+		for (const ctx of this.rooms.values()) {
+			if (ctx._sharing) return false;
+			if (ctx.transfer && (ctx.transfer.in.size || ctx.transfer.out.size)) return false;
+			if (ctx.sync && ctx.sync._pumping) return false;
+			if (ctx.cal && ctx.cal.fetches.size) return false; // クリック取得（ビューア）中
+		}
+		return true;
+	}
+	async tryResume(hr) { // 退避条目からの自動復帰（rejoin→ダメなら pw で login→さらにダメならログイン画面）
+		if (!this.opfsOk) return false;
+		const room = await this.readRoom(hr.rid);
+		if (!room || room.conflict) return false;
+		try {
+			const nb = room.nm || hr.nb,
+				mode = hr.mode || 'normal',
+				ctx = await this.openRoom({ rid: hr.rid, nb, room, uid: hr.uid, mode });
+			if (hr.pw) ctx.plainPw = hr.pw; // 作成者は復帰後も pw QR/C 再発行が可能（追加仕様 v1.3）
+			location.hash = encodeURIComponent(nb);
+			this.view = { t: 'room', rid: hr.rid };
+			this.activate(hr.rid);
+			let ok = await ctx.session.rejoin().catch(() => false);
+			if (!ok && hr.pw) ok = await ctx.session.login({ password: hr.pw, mode, uid: hr.uid }).catch(() => false);
+			if (!ok) {
+				this.loginForm(hr.rid, room);
+				Toast(t('msg.hiber.fail'));
+			} else Toast(t('msg.hiber.ok'));
+			return true;
+		} catch (e) {
+			ef(e, 'room_app.resume');
+			return false;
+		}
+	}
 	// ---- 部屋セッション組立て（契約 boot 節 6: RoomSession+HashStore+FileTransfer+各モジュール）----
 	async openRoom({ rid, nb, room, uid, mode }) {
 		if (this.rooms.has(rid)) return this.rooms.get(rid);
 		const cfg = this.cfg,
 			ctx = {
 				rid, nb, uid, mode, title: RoomApp.unB64((room && room.nm) || nb) || rid, plainPw: '',
-				room: Object.assign({ nm: nb, pw: '', pwSalt: '', srvOn: false, cr: '', cg: 0, xorig: false, oa: [] }, room || {}),
+				room: Object.assign({ nm: nb, pw: '', pwSalt: '', srvOn: false, cr: '', cg: 0, xorig: false, oa: [], mx: 0 }, room || {}),
 			};
 		// send は session 経由（ミラーは BC 委譲、§9.12）。生成順循環回避の遅延バインド
-		ctx.transfer = new FileTransfer({ send: s => (ctx.session ? ctx.session.sendFrame(s) : false), cfg, uid });
+		ctx.transfer = new FileTransfer({ send: s => (ctx.session ? ctx.session.sendFrame(s) : false), cfg, uid, gHoldMs: mode === 'server' ? (cfg.SRV_G_HOLD_MS || 10000) : (cfg.G_HOLD_MS || 30000) });
 		// Q 応答側: 本体差し出し（§9.3。コンテンツアドレス故に保持していれば供給。nf=null）
 		ctx.transfer.onNeedBody = async h10 => {
 			try {
@@ -621,6 +671,7 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		};
 		ctx.session = new RoomSession({ rid, room: ctx.room, uid, mode, settings: AppSettings, transfer: ctx.transfer });
 		ctx.collection = new Collection({ rid, nameB64U: nb, uid, store: this.store, cfg, sendFrame: s => ctx.session.sendFrame(s) });
+		ctx.collection.cfg.MAX_IMG_BYTES = +ctx.room.mx > 0 ? +ctx.room.mx : cfg.MAX_IMG_BYTES; // 部屋毎上限（追加仕様。C 受信で共有部側も更新）
 		await ctx.collection.loadManifest();
 		await ctx.collection.refreshMetas();
 		ctx.collection.sweepIfNeeded( // §9.8 部屋起動スイープ（lastSweep は app_state）
@@ -628,6 +679,7 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 			() => AppSettings.setState('lastSweep', Date.now()).catch(e => ef(e, 'room_app.sweepSet'))
 		).catch(e => ef(e, 'room_app.sweepRoom'));
 		ctx.sheet = new SheetRoom({ rid, uid, store: this.store, img: ImgProc, cfg, sendFrame: s => ctx.session.sendFrame(s), transfer: ctx.transfer });
+		ctx.sheet.slices.max = mode === 'server' ? (cfg.SRV_SCACHE_MAX || 8) : (cfg.SCACHE_MAX || 64); // サーバーモード低メモリ化 v1.3
 		await ctx.sheet.scan().catch(e => ef(e, 'room_app.sheetScan'));
 		// 起動時: manifest→シート索引を復元（無変更なら送出なし。§9.7 オフライン再構築）
 		await ctx.sheet.rebuild(ctx.collection.manifestEntries()).catch(e => ef(e, 'room_app.sheetRebuild'));
@@ -636,7 +688,7 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 			if (ctx.foot) Vw.sT(ctx.foot, t('lbl.sync.footer', { total: s.total, fetched: s.fetched }));
 		};
 		ctx.sync.start();
-		ctx.slices = new SliceCache();
+		ctx.slices = new SliceCache(mode === 'server' ? (cfg.SRV_SCACHE_MAX || 8) : (cfg.SCACHE_MAX || 64));
 		// ---- session フック（契約外・lead 結合設計: hooks 公開プロパティ）----
 		ctx.session.hooks = {
 			onManifest: list => {
@@ -711,7 +763,7 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 			else if (p.ir === IR.J) {
 				hk.onJ(p, from);
 				// 新規参加者へ自保持索引を再周知（§9.4。1〜4s 遅延で送信中の M と間引く）
-				if (p.uid !== ctx.session.uid)
+				if (!p.to && p.uid !== ctx.session.uid)
 					setTimeout(() => {
 						try {
 							ctx.sheet.broadcastMNow();
@@ -733,11 +785,17 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		ctx.session.on('authOk', () => {
 			this.usageDirty();
 			this.renderTabs();
+			if (ctx.room.cr === ctx.uid) this.pushC(ctx).catch(() => {}); // 追加仕様: 作成者は設定(mx 等)を再配信（cg 同一分は受信側で無視・新規参加者は採用）
 			if (ctx.sheet) ctx.sheet.broadcastMNow(); // §9.4 自保持索引の周知
 			ctx.setItems();
 			if (this.active === rid) this.renderRoom(rid);
 		});
 		ctx.session.on('authFail', reason => Toast(t(reason || 'msg.auth.fail'))); // §12
+		ctx.session.on('roomUpdate', r => { // C 反映を ctx.room（共有側）へ同期（追加仕様: mx/srvOn）
+			Object.assign(ctx.room, r);
+			ctx.collection.cfg.MAX_IMG_BYTES = +ctx.room.mx > 0 ? +ctx.room.mx : this.cfg.MAX_IMG_BYTES;
+			this.renderTabs();
+		});
 		ctx.session.on('participants', list => {
 			ctx.collection.setOnline((list || []).map(x => x.uid));
 			if (ctx.paintParts) ctx.paintParts(list);
@@ -790,30 +848,97 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		this.view = { t: 'room', rid };
 		Vw.rc(this.main);
 		this.renderTabs();
+		// 参加者バッジ列（部屋名下・参加時刻昇順・サーバーモード参加者に S マーク。追加仕様）
+		const pr = Vw.div(this.main, { class: 'ir-parts' });
+		Vw.add(pr, 'span', { class: 'ir-parts-lbl' }).textContent = t('lbl.participants');
+		ctx.partsEl = Vw.div(pr, { class: 'ir-row' });
+		ctx.paintParts = list => {
+			Vw.rc(ctx.partsEl);
+			const ps = (list || ctx.session.state.participants || []).slice().sort((a, b) => (a.t || 0) - (b.t || 0));
+			for (const pt of ps) {
+				const b = Vw.add(ctx.partsEl, 'span', { class: 'ir-pbadge' + (pt.uid === ctx.uid ? ' me' : '') });
+				Vw.add(b, 'span').textContent = pt.uid;
+				if (pt.md === 'server') Badge(b, 'ir-ps', 'S');
+				b.title = t('lbl.part.join') + ': ' + (pt.t ? new Date(pt.t).toLocaleString() + ' (' + pt.t + ')' : '?');
+			}
+		};
+		ctx.paintParts();
+		// 作成者専用サブタブ: 画像 ⇄ URL QR ⇄ パスワード QR（追加仕様・作成者のみ表示）
+		if (ctx.room.cr === ctx.uid) {
+			const st = Vw.div(this.main, { class: 'ir-subtabs' });
+			for (const [k, key] of [['imgs', 'tab.view.imgs'], ['qrurl', 'tab.view.qrurl'], ['qrpw', 'tab.view.qrpw']]) {
+				const b = Vw.btn(st, { class: 'ir-subtab' + ((ctx.sub || 'imgs') === k ? ' on' : '') });
+				Vw.sT(b, t(key));
+				Vw.click(b, () => {
+					ctx.sub = k;
+					this.renderRoom(rid);
+				});
+			}
+			if (ctx.sub && ctx.sub !== 'imgs') {
+				this.qrPanel(ctx);
+				return;
+			}
+		}
+		if (ctx.mode === 'server') this.urlQrBlock(ctx); // サーバーモードは URL QR 常時表示（追加仕様）
 		// 共有部（§9.1: ファイル input → share → setThumb → rebuild → M broadcast[スロットル]）
 		const sb = Vw.div(this.main, { class: 'ir-sec' });
 		const fi = Vw.ipt(sb, { type: 'file', accept: 'image/*', multiple: 'multiple' });
-		Vw.sS(fi, { minHeight: '44px' });
+		Vw.aC(fi, 'ir-file');
 		Vw.change(fi, async () => {
 			const files = Array.prototype.slice.call(fi.files || []);
 			if (!files.length) return;
 			fi.disabled = true;
+			ctx._sharing = true; // 退避の安全点判定（転送中はリロードしない）
 			try {
 				let shared = 0;
+				// 部屋毎アップロード上限（追加仕様: C 配信で最新化）
+				ctx.collection.cfg.MAX_IMG_BYTES = +ctx.room.mx > 0 ? +ctx.room.mx : this.cfg.MAX_IMG_BYTES;
+				// §17 大きな画像・形式ポリシー（v1.4）: 非対応形式は即お断り。256MB 超確実も即お断り。
+				// 上限超（既定 10MB）は JPEG 縮小変換での共有を確認。
+				const MX_HARD = 256 * 1048576;
+				const OKM = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1, 'image/gif': 1, 'image/bmp': 1, 'image/avif': 1 };
 				for (const f of files) {
-					const r = await ctx.collection.share(f, { name: f.name, mime: f.type });
-					if (r.error === 'tooBig') Toast(t('msg.share.tooBig')); // §11 MAX_IMG_BYTES
+					const mx = ctx.collection.cfg.MAX_IMG_BYTES;
+					let use = f;
+					if (!OKM[(f.type || '').toLowerCase()]) {
+						Toast(t('msg.share.unsupported', { name: f.name })); // ブラウザ非対応形式 → 上記以前にお断り
+						continue;
+					}
+					if (f.size > MX_HARD) {
+						Toast(t('msg.share.tooBig'));
+						continue;
+					}
+					if (f.size > mx) {
+						let d = null;
+						try {
+							d = ImgProc.sniffDims(new Uint8Array(await f.slice(0, 65536).arrayBuffer()), (f.type || '').toLowerCase());
+						} catch (e) { /* ヘッダ読めぬものはデコードテストへ委ねる */ }
+						if (d && d.w > 0 && d.h > 0 && d.w * d.h * 4 > MX_HARD) {
+							Toast(t('msg.share.tooBig')); // デコードで 256MB を明らかに超える寸法 → お断り
+							continue;
+						}
+						if (!window.confirm(t('msg.share.over', { name: f.name, mb: (f.size / 1048576).toFixed(1), lim: Math.round(mx / 1048576) }))) continue;
+						const s = await ImgProc.shrink(f); // 縮小+JPEG 再圧縮（失敗=実質非対応）
+						if (!s) {
+							Toast(t('msg.share.unsupported', { name: f.name }));
+							continue;
+						}
+						use = new File([s.blob], f.name.replace(/\.[^.]*$/, '') + '.jpg', { type: 'image/jpeg' });
+					}
+					const r = await ctx.collection.share(use, { name: use.name, mime: use.type, defer: true }); // 一括: manifest 保存は末尾 1 回
+					if (r.error === 'tooBig') Toast(t('msg.share.tooBig', { limit: Math.round((+ctx.room.mx > 0 ? +ctx.room.mx : this.cfg.MAX_IMG_BYTES) / 1048576) })); // §11 上限（部屋 mx）
 					else if (r.error) Toast(t('msg.share.fail'));
 					else {
 						shared++;
 						try {
-							ctx.sheet.setThumb(r.h10, await ImgProc.thumb(f, this.cfg.THUMB_PX)); // §9.2 コマ
+							ctx.sheet.setThumb(r.h10, await ImgProc.thumb(use, this.cfg.THUMB_BASE_PX || 128)); // §9.2 コマ（v1.6 §20: 基準 128 contain）
 						} catch (e) {
 							ef(e, 'room_app.thumb');
 						}
 					}
 				}
 				if (shared) {
+					await ctx.collection.saveManifest(); // v1.5 §19: 一括共有の manifest 確定（差分行の一括追記）
 					await ctx.sheet.rebuild(ctx.collection.manifestEntries()); // 変更シートのみ queueBroadcast→スロットル送出（§8.6）
 					Toast(t('msg.share.ok'));
 				}
@@ -821,48 +946,70 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 				ef(e, 'room_app.share');
 				Toast(t('msg.share.fail'));
 			}
+			ctx._sharing = false;
 			fi.value = '';
 			fi.disabled = false;
 		});
 		// カレンダー（§5.5。RoomCalendar が窓制御・grayscale・progress 内蔵）
-		const tb = Vw.div(this.main, { class: 'ir-row' });
-		for (const m of ['day', 'week', 'month']) {
-			const b = Vw.btn(tb, { class: 'ir-btn' });
-			Vw.sT(b, t('btn.cal.' + m));
-			Vw.click(b, () => {
-				this.cfg.CAL_VIEW = m;
-				if (ctx.cal) ctx.cal.setMode(m);
-			});
-		}
+		// v2.0 §24: 日/週/月とサムネサイズはサムネ下のタブ行へ統合（上部ピッカー/モード行は廃止）
+		const szBtns = [];
+		const mkSzPick = host => {
+			const l = Vw.add(host, 'span', { class: 'ir-mut' });
+			Vw.sT(l, t('lbl.thumb.size'));
+			Vw.sS(l, { margin: '0 6px 0 2px' });
+			for (const v of this.cfg.THUMB_OPTS || [32, 64, 96, 128]) {
+				const b = Vw.btn(host, { class: 'ir-btn ir-tsz' });
+				Vw.sT(b, String(v));
+				Vw.tC(b, 'on', v === this.cfg.THUMB_PX);
+				Vw.click(b, () => applySz(v));
+				szBtns.push([v, b]);
+			}
+		};
+		const applySz = v => {
+			this.cfg.THUMB_PX = v;
+			this.setCssVars();
+			for (const [val, b] of szBtns) Vw.tC(b, 'on', val === v);
+			if (ctx.cal) ctx.cal.setThumbPx(v);
+			if (this.opfsOk) AppSettings.set('THUMB_PX', v).catch(() => {}); // 永続（次回起動時も同サイズ）
+		};
 		const calHost = Vw.div(this.main, {});
 		if (!ctx.cal) {
 			ctx.cal = new RoomCalendar({ parent: calHost, cfg: this.cfg, collection: ctx.collection, slices: { slicesOf: (u, i) => ctx.sheet.slicesOf(u, i) }, transfer: ctx.transfer, img: { bodyOf: h10 => this.bodyOf(h10) } });
+			ctx.cal.sc.max = ctx.mode === 'server' ? (this.cfg.SRV_SCACHE_MAX || 8) : (this.cfg.SCACHE_MAX || 64); // サーバーモード低メモリ化 v1.3
 			ctx.cal.onBody = (h10, blob) => this.viewer(h10, blob); // §5.4 ビューア橋渡し
 			ctx.cal.setMode(this.cfg.CAL_VIEW || 'month');
 		} else calHost.appendChild(ctx.cal.root);
 		ctx.setItems();
 		ctx.cal.refresh();
+		const ctrl = Vw.div(this.main, { class: 'ir-ctrlbar' }); // v2.1 §25: 日週月&サムネサイズを左下固定（スマホでも常時表示）
+		const btmTab = Vw.div(ctrl, { class: 'ir-calbar' }); // v2.0 §24: 日/週/月タブ（v2.1 で左下固定バー内）
+		if (ctx.cal.bar) btmTab.appendChild(ctx.cal.bar); // RoomCalendar のバーを下部へ統合（ハンドラ/on 同期は要素ごと移動）
+		for (const [m, mb] of ctx.cal._modeBtns) Vw.ael(mb, 'click', () => {
+			this.cfg.CAL_VIEW = m; // モード永続化（下部タブ統合に伴いここで記録）
+		});
+		const btm = Vw.div(ctrl, { class: 'ir-row ir-botrow' }); // サムネサイズはタブの次の行（§24: 行高ギリギリ・行間 1px）
+		mkSzPick(btm);
 		// フッター（同期モード時のみ、§9.9）
 		ctx.foot = Vw.add(this.main, 'div', { class: 'ir-mut' });
 		Vw.sS(ctx.foot, { display: ctx.sync.enabled ? '' : 'none' });
 		Vw.sT(ctx.foot, t('lbl.sync.footer', { total: 0, fetched: 0 }));
 		if (ctx.mode === 'server') this.serverPanel(ctx); // §5.7
 	}
-	// ---- サーバーモード表示（§5.7: 参加者/過去参加者/OPFS 内訳/autodl）----
+
 	async serverPanel(ctx) {
 		const s = Vw.div(this.main, { class: 'ir-sec' });
 		Vw.add(s, 'h4').textContent = t('lbl.participants');
 		const pl = Vw.div(s);
-		ctx.paintParts = list => {
+		const paintSrv = list => { // サーバーパネル側の参加者一覧（保持数併記・S 明示）
 			Vw.rc(pl);
-			for (const p of (list || ctx.session.state.participants || [])) {
+			for (const pt of (list || ctx.session.state.participants || [])) {
 				const row = Vw.div(pl, { class: 'ir-row' });
-				Vw.add(row, 'span').textContent = p.uid;
-				const hs = ctx.collection.peerHolds.get(p.uid);
+				Vw.add(row, 'span').textContent = pt.uid + (pt.md === 'server' ? ' [S]' : '');
+				const hs = ctx.collection.peerHolds.get(pt.uid);
 				if (hs) Vw.add(row, 'span', { class: 'ir-mut' }).textContent = hs.size;
 			}
 		};
-		ctx.paintParts(ctx.session.state.participants);
+		paintSrv(ctx.session.state.participants);
 		Vw.add(s, 'h4').textContent = t('lbl.pastParticipants');
 		const hl = Vw.div(s);
 		try {
@@ -936,10 +1083,14 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		if (!ctx) return;
 		try {
 			ctx.session.leave();
+			ctx.session.destroy(); // v1.3.1 C1: BC/購読/参照の完全解除（幽霊セッション保持の防止）
 		} catch (e) {
 			ef(e, 'room_app.leave');
 		}
 		try {
+			if (ctx.transfer) ctx.transfer.destroy(); // v1.3.1 C2: 転送状態・タイマ・待機の解放
+			if (ctx._mTmr) clearTimeout(ctx._mTmr); // L5: M バースト遅延
+			if (ctx.peerMap) ctx.peerMap.clear(); // M2
 			ctx.sync.dispose();
 			if (ctx.cal) ctx.cal.destroy();
 			if (ctx.sheet) ctx.sheet.destroy();
@@ -950,7 +1101,7 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		this.rooms.delete(rid);
 		if (this.active === rid) this.active = '';
 		AppSettings.setState('roomLogin.' + rid, null).catch(e => ef(e, 'room_app.rlClear')); // §11 app_state
-		if (decodeURIComponent((location.hash || '').replace(/^#/, '')) === ctx.nb) location.hash = '';
+		if (RoomApp.hashName() === ctx.nb) location.hash = '';
 	}
 	logout(rid) {
 		if (!rid) return;
@@ -1015,55 +1166,195 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		});
 		paint();
 	}
-	// ---- 本体ビューア（§5.4: フルサイズ+メタ+保存/DL/閉じる）----
+	// ---- 本体ビューア（追加仕様: タイトル=ファイル名・サイズ切替・ゴミ箱右端・保存不要(表示で OPFS 確定)・☓ 右上）----
+	slStop() {
+		// スライドショー停止（状態 + タイマ、v1.8 §22）
+		this._slOn = false;
+		if (this._slTimer) clearInterval(this._slTimer);
+		this._slTimer = 0;
+	}
+	slArm() {
+		if (this._slTimer) clearInterval(this._slTimer);
+		this._slTimer = setInterval(() => this.slNext(), this.cfg.SLIDE_MS || 3000);
+	}
+	async slNext() {
+		// 保有画像（meta を持つ非ゴミ箱項目）のみを-ts 降順-に次へ。全画面/slideshow は新ビューアで再開
+		if (!this._slOn) return;
+		const box = this._vBox;
+		if (!box || !box._h10 || !box._mdl || !box._mdl.isConnected) return;
+		const seq = this._slSeq || [];
+		if (seq.length < 2) return;
+		const i = (seq.indexOf(box._h10) + 1 + seq.length) % seq.length;
+		const nxt = seq[i];
+		if (nxt === box._h10) return;
+		const b = await this.bodyOf(nxt).catch(() => null);
+		if (!b) {
+			this.slStop(); // 実体を取り出せない項目は進めない（保有対象のみ送る仕様の維持）
+			return;
+		}
+		this._fsPend = true;
+		this._slPend = true;
+		this.viewer(nxt, b);
+	}
 	async viewer(h10, blob) {
+		// 同一画像の再クリック無視・別画像表示時は旧ビューアを閉じる（モーダル多重防止、追加仕様 v1.2）
+		if (this._vPend === h10) return;
+		if (this._vBox && this._vBox._mdl && this._vBox._mdl.isConnected) this._vBox._close();
+		this._vPend = h10;
 		const ctx = this.activeCtx();
-		const box = this.dlg(t('lbl.meta.h'));
-		const ab0 = await blob.arrayBuffer(),
-			url = `data:${blob.type || 'image/jpeg'};base64,${Y.a2B(ab0)}`; // CSP img-src 'self' data: 準拠（objectURL 不可）
-		const im = Vw.add(box, 'img', { class: 'ir-img' });
-		im.src = url;
 		const meta = await this.store.metaGet(h10).catch(() => null);
 		const nm = meta ? RoomApp.unB64(meta.n) || meta.n || '' : '';
-		const ext = (meta && meta.t ? String(meta.t).split('/')[1] : '') || 'jpg';
-		const rowOf = (k, v) => {
-			const r = Vw.add(box, 'div', { class: 'ir-row' });
-			Vw.add(r, 'span', { class: 'ir-mut' }).textContent = t(k);
-			Vw.add(r, 'span').textContent = v;
+		const box = this.dlg(nm || t('lbl.meta.n')); // ハッシュ表示ではなくファイル名をタイトルに（追加仕様）
+		this._vBox = box;
+		box._onClose = () => {
+			this._vBox = null;
+			this._vPend = null;
+			if (!this._slPend && !this._fsPend) this.slStop(); // slideshow の送器による差し替え時は停止しない（v1.8 §22）
+			im.removeAttribute('src'); // デコード済み画像を閉時速やかに解放（低メモリ化 v1.3）
 		};
-		rowOf('lbl.meta.n', nm);
-		if (meta) {
-			rowOf('lbl.meta.u', meta.u || '');
-			rowOf('lbl.meta.ts', new Date(meta.ts || 0).toLocaleString());
-			rowOf('lbl.meta.r', (meta.r || []).map(u => RoomApp.unB64(u) || u).join(', '));
-			rowOf('lbl.meta.t', meta.t || '');
-			rowOf('lbl.meta.h', String(h10).slice(0, 8));
-		}
-		const row = Vw.div(box, { class: 'ir-row' });
-		const sv = Vw.btn(row, { class: 'ir-btn' }); // 保存（OPFS bodies+meta 確定、§9.6）
-		Vw.sT(sv, t('btn.save'));
-		Vw.click(sv, async () => {
-			try {
-				await this.store.put(await blob.arrayBuffer());
-				this.usageDirty();
-				Toast(t('msg.settings.saved'));
-			} catch (e) {
-				ef(e, 'room_app.save');
-			}
-		});
-		const dl = Vw.btn(row, { class: 'ir-btn' }); // DL（OPFS 保存+ブラウザ DL）
-		Vw.sT(dl, t('btn.dl'));
-		Vw.click(dl, async () => {
-			try {
-				await this.store.put(await blob.arrayBuffer());
-			} catch (e) {
-				ef(e, 'room_app.save2');
-			}
-			this.dl(blob, (nm || h10) + '.' + ext);
+		let ab0 = await blob.arrayBuffer();
+		try {
+			// 同期/表示経路で OPFS 保存を確定（保存ボタン廃止、追加仕様）
+			await this.store.put(ab0);
 			this.usageDirty();
+		} catch (e) {
+			ef(e, 'room_app.autosave');
+		}
+		const url = `data:${blob.type || 'image/jpeg'};base64,${Y.a2B(ab0)}`; // サーバー既定 CSP が img-src data: のため objectURL 不可（解放は閉時）
+		const wrap = Vw.div(box, { class: 'ir-imgwrap fit' });
+		const im = Vw.add(wrap, 'img', { class: 'ir-img', alt: nm });
+		im.src = url;
+		const szr = Vw.add(box, 'div', { class: 'ir-row' }); // 表示サイズ ⇄ ネイティブサイズ切替（追加仕様）
+		Vw.add(szr, 'span', { class: 'ir-mut' }).textContent = t('lbl.view.size');
+		const szv = Vw.add(szr, 'span', { class: 'ir-mut' });
+		// 表示幅/1/4/1/2/ネイティブ/2倍/4倍。選択中ボタンは .on で示す（追加仕様 v1.2）
+		const ZM = [['btn.view.fit', 0], ['btn.view.z4', 0.25], ['btn.view.h2', 0.5], ['btn.view.native', 1], ['btn.view.x2', 2], ['btn.view.x4', 4]];
+		const zBtns = [];
+		const paintSz = () => {
+			if (im.naturalWidth) Vw.sT(szv, `${im.clientWidth}x${im.clientHeight} / ${im.naturalWidth}x${im.naturalHeight}`);
+		};
+		const setZoom = i => {
+			Vw.tC(wrap, 'fit', i === 0);
+			Vw.tC(wrap, 'native', i === 3);
+			Vw.tC(wrap, 'zoom', i !== 0 && i !== 3);
+			im.style.width = i === 0 || i === 3 ? '' : Math.round(im.naturalWidth * ZM[i][1]) + 'px';
+			zBtns.forEach((b, j) => Vw.tC(b, 'on', j === i));
+			setTimeout(paintSz, 0);
+		};
+		ZM.forEach(([k, f], i) => {
+			const b = Vw.btn(szr, { class: 'ir-btn' });
+			Vw.sT(b, t(k));
+			Vw.click(b, () => setZoom(i));
+			zBtns.push(b);
 		});
-		if (ctx && !ctx.collection.isTrashed(h10)) { // ごみ箱へ（§9.8。X flags → 実送出、削除は投稿者本人のみ）
-			const tr = Vw.btn(row, { class: 'ir-btn warn' });
+		im.onload = paintSz;
+		setZoom(0);
+		// ---- 全画面表示 & スライドショー（追加仕様 v1.8 §22）----
+		box._h10 = h10;
+		const fsr = Vw.add(box, 'div', { class: 'ir-row ir-fsrow' });
+		const bFs = Vw.btn(fsr);
+		Vw.sT(bFs, t('btn.fs'));
+		const bSl = Vw.btn(fsr);
+		Vw.sT(bSl, t('btn.slide'));
+		const heldSeq = () => {
+			const cs = ctx && ctx.collection;
+			if (!cs) return [h10];
+			const list = cs.roomItems()
+				.filter(it => it && it.h10 && !it.trashed && cs.metas.has(it.h10)) // 保有画像のみ（v1.8 §22）
+				.sort((a, b) => (b.ts || 0) - (a.ts || 0))
+				.map(it => it.h10);
+			return list.length ? list : [h10];
+		};
+		const askExit = () => {
+			// 解除はタップ → コンファームでのみ確定（v1.8 §22）。v1.9 §23: 確認中は送りタイマをポーズ（継続で再開）
+			if (box._fsc) return;
+			if (this._slOn && this._slTimer) {
+				clearInterval(this._slTimer);
+				this._slTimer = 0;
+				this._slPaused = true;
+			}
+			box._fsc = Vw.add(box, 'div', { class: 'ir-fsc' });
+			const pn = Vw.add(box._fsc, 'div', { class: 'ir-fsp' });
+			Vw.add(pn, 'div').textContent = t(this._slOn ? 'msg.slide.exit' : 'msg.fs.exit');
+			const kp = Vw.btn(pn);
+			Vw.sT(kp, t('btn.confirm.keep'));
+			Vw.click(kp, () => {
+				Vw.rm(box._fsc);
+				box._fsc = null;
+				if (this._slPaused && this._slOn) {
+					this._slPaused = false;
+					this.slArm();
+				}
+			});
+			const sp = Vw.btn(pn, { class: 'ir-btn warn' });
+			Vw.sT(sp, t('btn.confirm.stop'));
+			Vw.click(sp, () => {
+				Vw.rm(box._fsc);
+				box._fsc = null;
+				this.slStop();
+				Vw.tC(box, 'ir-fs', false);
+				try {
+					if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+				} catch (e) { /* 非対応環境は無視（アプリ内オーバーレイが本体） */ }
+			});
+		};
+		const enterFs = slide => {
+			Vw.aC(box, 'ir-fs');
+			try {
+				if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+			} catch (e) { /* 拒否/null 不可視はオーバーレイのみで成立 */ }
+			if (slide) {
+				this._slOn = true;
+				this._slSeq = heldSeq();
+				this.slArm();
+			}
+		};
+		Vw.click(bFs, () => (box.classList.contains('ir-fs') ? askExit() : enterFs(false)));
+		Vw.click(bSl, () => (this._slOn ? askExit() : enterFs(true)));
+		Vw.click(wrap, () => {
+			if (box.classList.contains('ir-fs')) askExit(); // 全画面中の画像タップは解除確認
+		});
+		if (this._fsPend) {
+			const sl = this._slPend === true;
+			this._fsPend = false;
+			this._slPend = false;
+			enterFs(sl); // slideshow の送器で開き直したセッションを全画面+自動送りで再開
+		}
+		// 画像下は 3 行のみ: 投稿者・部屋 / 投稿日・MimeType / SHA256Sum（追加仕様 v1.2）
+		const mb = Vw.add(box, 'div', { class: 'ir-meta3' });
+		if (meta) {
+			const mrow = pairs => {
+				const r = Vw.add(mb, 'div', { class: 'ir-row' });
+				pairs.forEach(([k, v], i) => {
+					if (i) Vw.add(r, 'span', { class: 'ir-sep' }).textContent = '・';
+					Vw.add(r, 'span', { class: 'ir-mut' }).textContent = t(k);
+					Vw.add(r, 'span').textContent = v;
+				});
+			};
+			mrow([['lbl.meta.u', meta.u || ''], ['lbl.meta.r', (meta.r || []).map(u => RoomApp.unB64(u) || u).join(', ')]]);
+			mrow([['lbl.meta.ts', new Date(meta.ts || 0).toLocaleString()], ['lbl.meta.t', meta.t || '']]);
+		}
+		const shr = Vw.add(mb, 'div', { class: 'ir-row' });
+		Vw.add(shr, 'span', { class: 'ir-mut' }).textContent = t('lbl.meta.sha');
+		const shv = Vw.add(shr, 'span', { class: 'ir-sha' });
+		shv.textContent = '...';
+		(async () => { // 表示中のバイトから SHA-256 をその場で計算（ハッシュ保管は内容アドレス h10 のため、追加仕様 v1.2）
+			try {
+				const d = await crypto.subtle.digest('SHA-256', ab0);
+				shv.textContent = [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
+			} catch (e) {
+				ef(e, 'room_app.sha');
+				shv.textContent = '(N/A)';
+			}
+			ab0 = null; // SHA 計算まで保持したら即時解放（低メモリ化 v1.3）
+		})();
+		const ext = (meta && meta.t ? String(meta.t).split('/')[1] : '') || 'jpg';
+		const row = Vw.div(box, { class: 'ir-mbtns' });
+		const dl = Vw.btn(row, { class: 'ir-btn' }); // DL のみ（保存は自動確定のため廃止、追加仕様）
+		Vw.sT(dl, t('btn.dl'));
+		Vw.click(dl, () => this.dl(blob, (nm || h10) + '.' + ext));
+		if (ctx && !ctx.collection.isTrashed(h10)) { // ごみ箱へ（§9.8）。ボタンは右端（追加仕様）
+			const tr = Vw.btn(row, { class: 'ir-btn warn ir-trright' });
 			Vw.sT(tr, t('btn.trash'));
 			Vw.click(tr, async () => {
 				const r = await ctx.collection.trash(h10).catch(e => ef(e, 'room_app.trash'));
@@ -1071,14 +1362,73 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 				if (r.x) ctx.session.sendFrame(Protocol.mk('X', { h: r.x.h, by: r.x.by }));
 				ctx.sheet.rebuild(ctx.collection.manifestEntries()).catch(e => ef(e, 'room_app.rebuild'));
 				this.usageDirty();
-				Vw.rm(box._mdl);
+				box._close();
 			});
 		}
-		const cl = Vw.btn(row, { class: 'ir-btn' });
-		Vw.sT(cl, t('btn.close'));
-		Vw.click(cl, () => {
-			URL.revokeObjectURL(url);
-			Vw.rm(box._mdl);
+	}
+	// ---- QR ユーティリティ（追加仕様: URL QR / パスワード QR 共通生成）----
+	roomUrl(ctx) { // 参加用 URL（§5.1 の #部屋名 b64url と互換）
+		return `${location.origin}/img_room.html#${encodeURIComponent(ctx.nb)}`;
+	}
+	async qrInto(host, text, { size, file, note, secret } = {}) {
+		Vw.rc(host);
+		// QR 画像と URL/ボタン/説明を横並びにする行。パスワード QR は秘密鍵色系（追加仕様 v1.2）
+		const row = Vw.div(host, { class: secret ? 'ir-qrrow ir-secret' : 'ir-qrrow' });
+		try {
+			const r = await QRTool.make(text, { size: size || this.cfg.QR_SIZE_PX, level: this.cfg.QR_CORRECT_LEVEL, retry: this.cfg.QR_VERIFY_RETRY });
+			if (r.failed) {
+				Vw.add(host, 'div', { class: 'ir-mut' }).textContent = t('msg.qr.verify.fail');
+				return;
+			}
+			Vw.aC(r.canvas, 'ir-qrimg');
+			Vw.add(row, 'div', { class: 'ir-qrpic' }).appendChild(r.canvas);
+			const side = Vw.add(row, 'div', { class: 'ir-qrside' });
+			const tx = Vw.ipt(side, { type: 'text', readonly: 'readonly' });
+			tx.value = r.data || text;
+			const rowq = Vw.div(side, { class: 'ir-row' });
+			const cp = Vw.btn(rowq, { class: 'ir-btn' });
+			Vw.sT(cp, t('btn.copy'));
+			Vw.click(cp, () => Vw.copy(tx.value));
+			const png = Vw.btn(rowq, { class: 'ir-btn' });
+			Vw.sT(png, t('btn.qr.png'));
+			Vw.click(png, async () => {
+				const b = await QRTool.pngBlob(r.canvas);
+				if (b) this.dl(b, file || 'qr.png');
+			});
+			if (note) Vw.add(side, 'div', { class: 'ir-qrnote' }).textContent = note;
+		} catch (e) {
+			ef(e, 'room_app.qr');
+			Vw.add(host, 'div', { class: 'ir-mut' }).textContent = t('msg.qr.verify.fail');
+		}
+	}
+	qrPanel(ctx) { // サブタブの QR パネル（qrurl: 部屋 URL / qrpw: 認証 QR。作成者のみ呼ばれる）
+		const sec = Vw.div(this.main, { class: 'ir-sec' });
+		Vw.add(sec, 'h4').textContent = (ctx.sub === 'qrpw' ? '\ud83d\udd11 ' : '') + (ctx.sub === 'qrpw' ? t('tab.view.qrpw') : t('tab.view.qrurl'));
+		if (ctx.sub === 'qrpw') {
+			if (!ctx.plainPw) {
+				Vw.add(sec, 'div', { class: 'ir-mut' }).textContent = t('msg.qr.needpw');
+				return;
+			}
+			// 秘密鍵色系の独立エリア（URL QR とは明確に区別、追加仕様 v1.2）
+			this.qrInto(sec, qrPack(ctx.nb, ctx.plainPw), {
+				file: ctx.rid + '.pw.png',
+				secret: true,
+				note: t('lbl.qr.secret') + ' ' + t('lbl.qr.scan.pw'),
+			});
+			return;
+		}
+		this.qrInto(sec, this.roomUrl(ctx), {
+			file: ctx.rid + '.url.png',
+			note: t('lbl.qr.scan.url'), // スキャン時の挙動説明（追加仕様 v1.2）
+		});
+	}
+	urlQrBlock(ctx) { // サーバーモード参加者は URL QR 常時表示（追加仕様）
+		const sec = Vw.div(this.main, { class: 'ir-sec' });
+		Vw.add(sec, 'h4').textContent = t('lbl.qr.url');
+		this.qrInto(sec, this.roomUrl(ctx), {
+			size: 160,
+			file: ctx.rid + '.url.png',
+			note: t('lbl.qr.scan.url'),
 		});
 	}
 	// ---- 作成者メニュー（§5.2: QR 表示/DL・パスワード再発行・oa 管理・srvOn 切替・退室）----
@@ -1087,43 +1437,15 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		if (!ctx || ctx.room.cr !== ctx.uid) return; // 作成者本人のみ（§5.3/§6.2）
 		const box = this.dlg(t('btn.room.menu'));
 		// QR（§6.4: 生成→検証→PNG DL。平文 pw は作成/再発行後のセッション中のみ保持）
-		const qrBox = Vw.div(box, {});
-		const mkQr = async () => {
-			Vw.rc(qrBox);
+		let qrBox = null; // v1.9 §23: QR 欄はメニュー末尾（QR とその情報の下に要素を置かない）
+		const mkQr = () => {
 			if (!ctx.plainPw) {
+				Vw.rc(qrBox);
 				Vw.add(qrBox, 'div', { class: 'ir-mut' }).textContent = t('msg.qr.needpw');
 				return;
 			}
-			try {
-				const r = await QRTool.make(qrPack(ctx.nb, ctx.plainPw), {
-					size: this.cfg.QR_SIZE_PX, level: this.cfg.QR_CORRECT_LEVEL, retry: this.cfg.QR_VERIFY_RETRY,
-				});
-				if (r.failed) {
-					Toast(t('msg.qr.verify.fail'));
-					return;
-				}
-				Vw.sS(r.canvas, { maxWidth: '100%', background: '#fff' });
-				qrBox.appendChild(r.canvas);
-				Vw.add(qrBox, 'div', { class: 'ir-mut' }).textContent = t('lbl.qr.text');
-				const tx = Vw.ipt(qrBox, { type: 'text', readonly: 'readonly' });
-				tx.value = r.data || qrPack(ctx.nb, ctx.plainPw);
-				const rowq = Vw.div(qrBox, { class: 'ir-row' });
-				const cp = Vw.btn(rowq, { class: 'ir-btn' });
-				Vw.sT(cp, t('btn.copy'));
-				Vw.click(cp, () => Vw.copy(tx.value));
-				const png = Vw.btn(rowq, { class: 'ir-btn' });
-				Vw.sT(png, t('btn.qr.png'));
-				Vw.click(png, async () => {
-					const b = await QRTool.pngBlob(r.canvas);
-					if (b) this.dl(b, ctx.rid + '.png');
-				});
-			} catch (e) {
-				ef(e, 'room_app.qr');
-				Toast(t('msg.qr.verify.fail'));
-			}
+			this.qrInto(qrBox, qrPack(ctx.nb, ctx.plainPw), { file: ctx.rid + '.png', secret: true, note: t('lbl.qr.secret') });
 		};
-		Vw.add(box, 'h4').textContent = t('btn.qr');
-		mkQr();
 		// パスワード再発行（新 seed 算出 → C 送出、§6.3/§8.3）
 		const r1 = Vw.div(box, { class: 'ir-row' });
 		const iss = Vw.btn(r1, { class: 'ir-btn' });
@@ -1194,9 +1516,13 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		const lv = Vw.btn(r3, { class: 'ir-btn warn' });
 		Vw.sT(lv, t('btn.leave'));
 		Vw.click(lv, () => {
-			Vw.rm(box._mdl);
+			box._close(); // H4: dlg.close() 経由（keydown 解除）
 			this.logout(ctx.rid);
 		});
+		// QR（§6.4）は最終セクション（v1.9 §23: QR+情報の下に表示要素なし）
+		Vw.add(box, 'h4').textContent = t('btn.qr');
+		qrBox = Vw.div(box, {});
+		mkQr();
 	}
 	// C フレーム送出 + room.json 永続化（§8.3。cg 単調増加、旧い C は受信側無視）
 	async pushC(ctx) {
@@ -1206,6 +1532,7 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 			srvOn: ctx.room.srvOn === true || ctx.room.srvOn === 'true',
 			xorig: ctx.room.xorig === true || ctx.room.xorig === 'true',
 			oa: ctx.room.oa || [],
+			mx: +ctx.room.mx || 0, // 追加仕様: 単一画像上限（bytes）
 		};
 		try {
 			ctx.session.sendFrame(Protocol.mk('C', o));
@@ -1216,7 +1543,7 @@ body{margin:0;background:#181c22;color:#e8ecf2;font:14px/1.5 system-ui,sans-seri
 		try {
 			await OPFS.w(STORAGE.roomFile(ctx.rid), Y.s2u(JSON.stringify({
 				rid: ctx.rid, nm: ctx.room.nm, pw: o.pw, pwSalt: o.pwSalt, srvOn: o.srvOn,
-				cr: o.cr, cg: o.cg, xorig: o.xorig, oa: o.oa,
+				cr: o.cr, cg: o.cg, xorig: o.xorig, oa: o.oa, mx: o.mx || 0,
 			})).buffer);
 		} catch (e) {
 			ef(e, 'room_app.saveRoom');
