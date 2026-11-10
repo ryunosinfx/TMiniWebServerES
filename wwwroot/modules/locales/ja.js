@@ -119,6 +119,7 @@ export default {
 	'msg.ws.set': 'WebSocket URL を設定しました:',
 	'msg.ws.got': 'QR から WebSocket URL を読み込みました',
 	'msg.ws.bad': 'WebSocket URL が正しくありません',
+	'msg.ws.multi': 'WebSocket URL は 1 つだけ指定できます',
 	'btn.trash.ico': '🗑️',
 	'msg.dl.ok': 'ダウンロードしました', // v2.2 §26
 	'mode.sync': '同期',

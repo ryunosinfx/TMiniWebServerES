@@ -581,6 +581,10 @@ export class RoomApp {
 		};
 		const apply = async () => {
 			const raw = inp.value.trim();
+			if (/[\s,]/.test(raw)) {
+				Toast(t('msg.ws.multi')); // v2.6 §31: 複数指定不可（単一値のみ OPFS user_settings.json に保持）
+				return;
+			}
 			if (raw && !wsNorm(raw)) {
 				Toast(t('msg.ws.bad'));
 				return;

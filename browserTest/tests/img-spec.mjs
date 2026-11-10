@@ -436,19 +436,19 @@ await A.click('.ir-fsp button:has-text("続ける")');
 await A.waitForTimeout(300);
 ck('fsKeepOn', (await A.locator('.ir-mbx.ir-fs').count()) === 1 && (await A.locator('.ir-fsc').count()) === 0);
 // v2.5 §30: 全画面中の ←/→ は戻る/次へ。解除確認ボタンは同サイズ・10px 間隔
-const t0k = (await A.textContent('.ir-mbx h3')).trim();
+const h0k = await A.evaluate(() => window.__IRAPP._vBox._h10); // ファイル名重複に依存しない
 await A.keyboard.press('ArrowRight');
-await A.waitForFunction(n => {
-	const x = document.querySelector('.ir-mbx h3');
-	return x && x.textContent.trim() !== n;
-}, t0k, { timeout: 8000 });
+await A.waitForFunction(h => {
+	const b = window.__IRAPP._vBox;
+	return b && b._h10 !== h;
+}, h0k, { timeout: 8000 });
 ck('fsKeyNext', (await A.locator('.ir-mbx.ir-fs').count()) === 1);
 await A.keyboard.press('ArrowLeft');
-await A.waitForFunction(n => {
-	const x = document.querySelector('.ir-mbx h3');
-	return x && x.textContent.trim() === n;
-}, t0k, { timeout: 8000 });
-ck('fsKeyPrev', (await A.textContent('.ir-mbx h3')).trim() === t0k);
+await A.waitForFunction(h => {
+	const b = window.__IRAPP._vBox;
+	return b && b._h10 === h;
+}, h0k, { timeout: 8000 });
+ck('fsKeyPrev', true);
 await A.click('.ir-imgwrap');
 await A.waitForSelector('.ir-fsc', { timeout: 5000 });
 ck('confirmBtnSize', await A.evaluate(() => {
@@ -578,11 +578,11 @@ ck('modeRadio', await A.evaluate(() => {
 	const rs = [...bx.querySelectorAll('input[type="radio"][name="ir-mode"]')];
 	return rs.length === 2 && rs.filter(i => i.checked).length === 1;
 }));
-await A.waitForTimeout(4500); // パスワード発行トースト（4s）の消灯待ち
+await A.waitForSelector('.ir-toast', { state: 'detached', timeout: 8000 }).catch(() => {}); // 先行トースト消灯待ち（消灯済み即時可）
 await A.click('.ir-mbx button:has-text("PNG 保存")');
-await A.waitForSelector('.ir-toast:has-text("ダウンロードしました")', { timeout: 5000 });
+await A.waitForSelector('.ir-toast:has-text("ダウンロードしました")', { timeout: 8000 });
 ck('dlToast', true);
-await A.waitForTimeout(9200);
+await A.waitForTimeout(9200); // 10s 表示のうち ~9.2s 時点: まだ表示
 ck('dlToastPersist', (await A.locator('.ir-toast').count()) === 1);
 await A.waitForTimeout(2000);
 ck('dlToastEnd', (await A.locator('.ir-toast').count()) === 0);
@@ -682,6 +682,26 @@ await P3.waitForSelector('button:has-text("⚙️ 接続設定")', { timeout: 15
 await P3.click('button:has-text("⚙️ 接続設定")');
 await P3.waitForSelector('input[name="ir-wsb"]', { timeout: 10000 });
 ck('wsPersist', (await P3.inputValue('input[name="ir-wsb"]')) === 'ws://example.local:9999');
+// v2.6 §31: OPFS 全体設定（user_settings.json）へ単一値。複数指定は拒否
+ck('wsBootRestore', await P3.evaluate(async () => {
+	const m = await import('/modules/imgroom/ir_const.js');
+	return m.getWsBase() === 'ws://example.local:9999';
+}));
+ck('wsOpfsStored', await P3.evaluate(async () => {
+	const { OPFS } = await import('/OPFS.js');
+	const ab = await OPFS.r('user_settings.json');
+	if (!ab) return false;
+	const o = JSON.parse(new TextDecoder().decode(ab));
+	return o.WSBASE === 'ws://example.local:9999';
+}));
+await P3.fill('input[name="ir-wsb"]', 'ws://a.example ws://b.example');
+await P3.click('.ir-mbx button:has-text("適用")');
+await P3.waitForTimeout(500);
+ck('wsMultiReject', await P3.evaluate(async () => {
+	const m = await import('/modules/imgroom/ir_const.js');
+	const toast = [...document.querySelectorAll('.ir-toast')].some(e => (e.textContent || '').includes('1 つだけ'));
+	return m.getWsBase() === 'ws://example.local:9999' && toast && (document.querySelector('input[name="ir-wsb"]').value || '').includes('a.example');
+}));
 const png = await P3.evaluate(async () => {
 	const m = await import('/modules/qr_tool.js');
 	const r = await m.QRTool.make('TMIWS1:https://qrhost.example', { size: 320 });

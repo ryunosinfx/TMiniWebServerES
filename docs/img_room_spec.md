@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.5
+- ステータス: ドラフト v2.6
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1172,3 +1172,12 @@ msg  ≒ 11.0 KB
 
 ### テスト（「SPEC OK」）
 - `fsKeyNext`/`fsKeyPrev`（全画面→/←で h3 変化・復復、ir-fs 維持）/ `slideKeyPrev`（スライドショー←で戻る）/ `confirmBtnSize`（2 ボタン同寸法・横間隔 8〜12px）/ `wsBtnCreate`（作成画面のボタン）/ `wsQrAuto`（オープン時 canvas 自動表示）。
+
+## 31. 追加仕様 v2.6: WebSocket 設定は OPFS 全体設定へ（単一値のみ）
+確定事項（2026-11-11 の追加指示で確定）:
+1. **保存先**: WebSocket URL 設定は**変更時に OPFS の全体設定ファイル `user_settings.json`（AppSettings('WSBASE')）**へ保存する（§11 と同一経路・debounce 500ms flush）。ブラウザ再起動後も `boot()` で `setWsBase()` 復元。localStorage は使わない。
+2. **複数指定はいったん許可しない**: 設定値は**単一の URL 文字列のみ**。空白・カンマを含む入力（複数 URL 指定）は「WebSocket URL は 1 つだけ指定できます」で拒否し、既存設定は変更しない。将来の複数ホスト対応までは 1 値限定。
+
+### テスト（「SPEC OK」）
+- `wsOpfsStored`（`OPFS.r('user_settings.json')` の JSON に WSBASE 単一値）/ `wsBootRestore`（reload 後 boot 復元）/ `wsMultiReject`（2 URL 入力→拒否 toast・設定不変）。
+- 既存検査の堅牢化: `fsKeyNext/fsKeyPrev` は h3 文字列でなく `_vBox._h10` ベース（同名画像依存の除去）、DL トーストは先行トーストの detached 待ち。

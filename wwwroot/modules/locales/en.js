@@ -122,6 +122,7 @@ export default {
 	'msg.ws.set': 'WebSocket URL set to:',
 	'msg.ws.got': 'WebSocket URL read from QR',
 	'msg.ws.bad': 'Invalid WebSocket URL',
+	'msg.ws.multi': 'Only one WebSocket URL is allowed',
 	'btn.trash.ico': '🗑️',
 	'btn.trash.restore': 'Restore',
 	'lbl.qr.text': 'QR text',
