@@ -457,7 +457,12 @@ export class RoomApp {
 		Vw.add(f, 'h3').textContent = t('btn.create');
 		const nmIn = Vw.ipt(f, { type: 'text', name: 'ir-cn', placeholder: t('lbl.room.name') });
 		const uidIn = Vw.ipt(f, { type: 'text', name: 'ir-cuid', placeholder: t('lbl.username') });
+		Vw.add(f, 'label').textContent = t('lbl.password'); // v2.3 §27: パスワードエリアにラベル
 		const pwIn = Vw.ipt(f, { type: 'text', name: 'ir-cpw', placeholder: t('lbl.password') });
+		// v2.3 §27: 最終作成値（LS）を初期値に。部屋名には yyyy-mm-dd-hh-mm-ss を追加（既存同形式は置換）。名前無ければ names からランダム
+		const last = await this.lastDef();
+		if (last && last.nm) nmIn.value = this.withTs(last.nm);
+		uidIn.value = (last && last.uid) || this.rndName();
 		const mxRow = Vw.div(f, { class: 'ir-row' }); // 追加仕様: 単一画像上限（既定 10MB・作成時に変更可）
 		Vw.add(mxRow, 'span', { class: 'ir-mut' }).textContent = t('lbl.maxmb');
 		const mxIn = Vw.ipt(mxRow, { type: 'number', name: 'ir-cmx', min: '1', max: '200', step: '1' });
@@ -496,6 +501,63 @@ export class RoomApp {
 			await this.doCreate({ rid, nb, nmRaw, uid, pw, xorig: xo.get(), mx });
 		});
 	}
+	// ---- v2.3 §27: 最終作成値（LocalStorage: base64url(DEFLATE(JSON{nm,uid}))）----
+	static TS_RE = /(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})$/;
+	static tsStr() {
+		const d = new Date(),
+			p2 = n => (n < 10 ? '0' + n : '' + n);
+		return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}-${p2(d.getHours())}-${p2(d.getMinutes())}-${p2(d.getSeconds())}`;
+	}
+	withTs(nm) { // 同一形式（yyyy-mm-dd-hh-mm-ss）が末尾にあれば置換、無ければ追加
+		const base = (nm || '').replace(RoomApp.TS_RE, '').replace(/-+$/, '');
+		return (base ? base + '-' : '') + RoomApp.tsStr();
+	}
+	rndName() {
+		const a = (this.cfg && this.cfg.names) || [];
+		if (!a.length) return '';
+		const i = crypto.getRandomValues(new Uint32Array(1))[0] % a.length;
+		return a[i];
+	}
+	async lastDef() { // 復号: 先頭 D=deflate-raw / R=平文。localStorage 未対応/不正は null
+		try {
+			const v = localStorage.getItem('ir_lastdef');
+			if (!v || v.length < 2) return null;
+			const kind = v[0],
+				bin = atob(v.slice(1).replace(/-/g, '+').replace(/_/g, '/')),
+				u8 = new Uint8Array(bin.length);
+			for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+			let j;
+			if (kind === 'D') {
+				if (typeof DecompressionStream !== 'function') return null;
+				j = await new Response(new Blob([u8]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+			} else j = new TextDecoder().decode(u8);
+			const o = JSON.parse(j);
+			return o && typeof o.nm === 'string' && typeof o.uid === 'string' ? o : null;
+		} catch (e) {
+			ef(e, 'room_app.lastDef');
+			return null;
+		}
+	}
+	async saveLastDef(o) { // JSON → deflate-raw → base64url（URL 安全符号）で LocalStorage
+		try {
+			const j = JSON.stringify(o);
+			let kind = 'R',
+				bytes = new TextEncoder().encode(j);
+			if (typeof CompressionStream === 'function') {
+				try {
+					bytes = new Uint8Array(await new Response(new Blob([j]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+					kind = 'D';
+				} catch (e) {
+					ef(e, 'room_app.gzip');
+				}
+			}
+			let bin = '';
+			for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+			localStorage.setItem('ir_lastdef', kind + btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''));
+		} catch (e) {
+			ef(e, 'room_app.saveLastDef');
+		}
+	}
 	async roomExists(rid) {
 		if (!this.opfsOk) return false;
 		try {
@@ -533,6 +595,7 @@ export class RoomApp {
 		}
 		Toast(t('msg.room.created') + ' ' + nmRaw);
 		AppSettings.setNested('MODE.' + rid, 'normal').catch(e => ef(e, 'room_app.mode'));
+		this.saveLastDef({ nm: nmRaw, uid }).catch(e => ef(e, 'room_app.lastDef')); // v2.3 §27: 次回作成の初期値
 	}
 	// ---- QR スキャン（§5.4: camera→error なら PNG file→text paste）----
 	scanFlow(onFound) {
@@ -904,7 +967,8 @@ export class RoomApp {
 		ctx._zone = zone;
 		// 共有部（§9.1: ファイル input → share → setThumb → rebuild → M broadcast[スロットル]）
 		const sb = Vw.div(zone, { class: 'ir-sec' });
-		const fi = Vw.ipt(sb, { type: 'file', accept: 'image/*', multiple: 'multiple' });
+		const up = Vw.div(sb, { class: 'ir-uparea' }); // v2.3 §27: 明色は画像登録エリアのみ
+		const fi = Vw.ipt(up, { type: 'file', accept: 'image/*', multiple: 'multiple' });
 		Vw.aC(fi, 'ir-file');
 		Vw.change(fi, async () => {
 			const files = Array.prototype.slice.call(fi.files || []);

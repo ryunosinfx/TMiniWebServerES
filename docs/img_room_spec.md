@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.2
+- ステータス: ドラフト v2.3
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1124,3 +1124,20 @@ msg  ≒ 11.0 KB
 ### テスト（「SPEC OK」「RATIO OK」）
 - `qrQuiet2`（四周 4px 以上白・縁=2 モジュール相当で 8% 以内）/ `pwDefault`（生成値 ≧8 文字）/ `pwRegenLabel`（「パスワード再作成」）/ `fileBrighter`（背景有色）/ `syncZoneOn`（B 側 .ir-seczone.ir-srvon・2px 実線枠・共有欄+カレンダー内包）/ `modeRadio`（メニュー 2 択）/ `hdrModeRadio`（ヘッダー 2 択）/ `dlToast`+`dlToastPersist`（約 10 秒表示）+`dlToastEnd`。
 - img-ratio 全画面検査に**画面いっぱい拡大**（実描画が幅 95%以上 or 高さ 95%以上、aspect 維持）を追加。
+
+## 27. 追加仕様 v2.3: 登録エリアのみの明色 / pw ラベル / names 既定 / 最終作成値の保存
+確定事項（2026-11-11 の追加指示で確定）:
+1. **明色は画像登録エリアのみ**: v2.2 でファイル input 自体に付けた明色を、専用コンテナ `.ir-uparea`（画像登録エリア）へ集約。input 自体は透明。
+2. **パスワードエリアは「パスワード」**: 部屋作成フォームのパスワード入力にラベル「パスワード」を表示（自動生成値が既定されると placeholder が見えなくなるため）。
+3. **名前の初期値**: `ir_const.js` の `CFG.names` から**ランダム**に初期設定（保存された uid がある場合はそれを優先）。
+4. **最終作成値の保存（LocalStorage）**: 部屋名と名前を `JSON → deflate-raw 圧縮 → base64url`（先頭文字 D=圧縮/R=平文フォールバック）で localStorage キー `ir_lastdef` に保存。部屋作成成功時に保存し、**次回作成フォームの初期値**として復号してセットする。
+   - 初期値設定時、**部屋名末尾に `yyyy-mm-dd-hh-mm-ss`（ローカル時刻）を追加**。既に同形式が付いている場合は**置換**（`withTs`）。
+   - 復号は `DecompressionStream('deflate-raw')`。非対応環境は保存時も平文（R）にフォールバック。
+
+### 実装
+- `ir_const.js`: `CFG.names`（語彙 12 件）追加。
+- `room_app.js`: `withTs/tsStr/rndName/lastDef/saveLastDef`。createForm でプリセット・pw ラベル・`.ir-uparea` ラップ。doCreate 成功後 `saveLastDef`。
+- `css/imgroom.css`: `.ir-uparea`（明色+破線枠）、`.ir-file` は最小限样式へ。
+
+### テスト（「SPEC OK」）
+- `upLightOnly`（.ir-uparea 明色・input 透明・包含）/ `pwLabel` / `nameRandom`（names に含まれる）/ `lsFormat`（`^[DR][A-Za-z0-9_-]+$`）/ `lsDecode`（nm/uid 一致）/ `prefillTs`（保存部屋名+ts）/ `prefillUid` / `tsReplace`（同形式は置換）。`fileBrighter` は .ir-uparea ベースへ更新。

@@ -172,13 +172,17 @@ body {
 	border-radius: 8px;
 	min-height: 40px;
 }
-.ir-file {
-	min-height: 44px;
-	/* v2.2 §26: 「画像ファイルが選択されていません」領域をやや明るくして判別しやすく */
+.ir-uparea {
+	/* v2.3 §27: 明色は画像登録エリアのみ（v2.2 の .ir-file 明色はここへ集約） */
 	background: color-mix(in srgb, var(--ir-bg) 76%, #ffffff);
 	border: 1px dashed var(--ir-line);
 	border-radius: 8px;
 	padding: 6px 8px;
+	margin: 2px 0 6px;
+}
+.ir-file {
+	min-height: 44px;
+	max-width: 100%;
 }
 .ir-crd {
 	display: flex;

@@ -563,9 +563,10 @@ ck('syncZoneOn', await B.evaluate(() => {
 	return g.borderTopWidth === '2px' && g.borderTopStyle === 'solid' && !!z.querySelector('.ir-file') && !!z.querySelector('.ir-roomcal');
 }));
 ck('fileBrighter', await B.evaluate(() => {
-	const fi = document.querySelector('.ir-file');
-	if (!fi) return false;
-	const bg = getComputedStyle(fi).backgroundColor;
+	// v2.3 §27: 明色は画像登録エリア(.ir-uparea)のみ。ファイル input 自体は透明
+	const up = document.querySelector('.ir-uparea');
+	if (!up) return false;
+	const bg = getComputedStyle(up).backgroundColor;
 	return bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent';
 }));
 const D = await mk('D');
@@ -577,6 +578,41 @@ await D.waitForTimeout(900);
 ck('pwDefault', (await D.inputValue('input[name="ir-cpw"]')).length >= 8);
 ck('pwRegenLabel', (await D.locator('button:has-text("パスワード再作成")').count()) === 1);
 await D.close();
+// ---- v2.3 §27: 登録エリアのみ明色 / pw ラベル / names 既定 / LS(deflate→b64url) ----
+ck('upLightOnly', await B.evaluate(() => {
+	const up = document.querySelector('.ir-uparea'),
+		fi = document.querySelector('.ir-file');
+	if (!up || !fi) return false;
+	return getComputedStyle(up).backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(fi).backgroundColor === 'rgba(0, 0, 0, 0)' && up.contains(fi);
+}));
+ck('lsFormat', await A.evaluate(() => /^[DR][A-Za-z0-9_-]+$/.test(localStorage.getItem('ir_lastdef') || '')));
+ck('lsDecode', await A.evaluate(async nm => {
+	const d = await window.__IRAPP.lastDef();
+	return !!d && d.nm === nm && d.uid === 'PONTA';
+}, ROOM));
+const P2 = await A.context().newPage();
+await P2.goto(BASE + '/img_room.html');
+await P2.waitForSelector('button:has-text("部屋作成")', { timeout: 15000 });
+await P2.click('button:has-text("部屋作成")');
+await P2.waitForSelector('input[name="ir-cn"]', { timeout: 10000 });
+await P2.waitForTimeout(500);
+const nmv = await P2.inputValue('input[name="ir-cn"]');
+ck('prefillTs', nmv.startsWith(ROOM + '-') && /-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$/.test(nmv), nmv);
+ck('prefillUid', (await P2.inputValue('input[name="ir-cuid"]')) === 'PONTA');
+ck('tsReplace', await P2.evaluate(() => {
+	const r = window.__IRAPP.withTs('abc-2020-01-01-00-00-00');
+	return r.startsWith('abc-') && !r.includes('2020-') && /-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$/.test(r);
+}));
+await P2.close();
+const D2 = await mk('D2');
+await D2.goto(BASE + '/img_room.html');
+await D2.waitForSelector('button:has-text("部屋作成")', { timeout: 15000 });
+await D2.click('button:has-text("部屋作成")');
+await D2.waitForSelector('input[name="ir-cpw"]', { timeout: 10000 });
+ck('pwLabel', (await D2.locator('.ir-frm label:has-text("パスワード")').count()) === 1);
+const un = await D2.inputValue('input[name="ir-cuid"]');
+ck('nameRandom', un.length > 0 && (await D2.evaluate(x => (window.__IRAPP.cfg.names || []).includes(x), un)), un);
+await D2.close();
 
 console.log(JSON.stringify({ engine: name, room: ROOM, checks, errors }, null, 1));
 const bad = errors.length || Object.values(checks).some(v => !v);

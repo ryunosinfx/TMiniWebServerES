@@ -4,6 +4,8 @@ import { Y, H } from '../../Y.js';
 
 // 仕様 §11 の既定値。user_settings.json とマージされ、AppSettings.cfg が正（本オブジェクトは既定値のみ）
 export const CFG = {
+	// v2.3 §27: 名前初期値の語彙（createForm でランダム選択）
+	names: ['ponta', 'sanae', 'rin', 'tama', 'hana', 'yuki', 'sora', 'hikari', 'kaede', 'konatsu', 'mosuke', 'tsubaki'],
 	GRID_COLS: 4,
 	GRID_ROWS: 8,
 	SLIDE_MS: 3000, // v1.8 §22: スライドショーの 1 枚あたり表示 ms
