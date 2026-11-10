@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.3
+- ステータス: ドラフト v2.4
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1141,3 +1141,19 @@ msg  ≒ 11.0 KB
 
 ### テスト（「SPEC OK」）
 - `upLightOnly`（.ir-uparea 明色・input 透明・包含）/ `pwLabel` / `nameRandom`（names に含まれる）/ `lsFormat`（`^[DR][A-Za-z0-9_-]+$`）/ `lsDecode`（nm/uid 一致）/ `prefillTs`（保存部屋名+ts）/ `prefillUid` / `tsReplace`（同形式は置換）。`fileBrighter` は .ir-uparea ベースへ更新。
+
+## 29. 追加仕様 v2.4: WebSocket URL の設定と QR（表示/変更/読み取り）
+確定事項（2026-11-11 の追加指示で確定）:
+1. **WebSocket URL にも QR コードと設定ボタン**を追加する。ホームに「⚙️ 接続設定」ボタン、ダイアログに WebSocket URL 入力・**QR 表示**・**QR 読取**・適用・サイト既定ボタン。
+2. **既定はサイトと同じ**（`location.origin`）。入力空欄＝既定。上書き値は `AppSettings('WSBASE')` に永続し、`boot()` で `setWsBase()`。接続 URL は `wsUrl(rid) = WSベース + /ws/chat/<rid>`（§3 と同一パス）。設定は**次回再接続から有効**（張替再接続はしない）。
+3. **QR 読み取りはカメラ接続**：既存 `scanFlow`（§5.4）を再利用。`getUserMedia` でカメラ映像から jsQR 連続読取（§5.4 と同一の停止保証 H3）。カメラ不可環境は PNG ファイル読取／テキスト貼付にフォールバック。
+   - QR 内容: `TMIWS1:<url>`（読取時は `https?://`・`ws(s)://` 生 URL も受理。`http→ws`/`https→wss` 正規化、末尾スラッシュ除去、不正は `msg.ws.bad`）。
+
+### 実装
+- `ir_const.js`: `WS_PREFIX/setWsBase/getWsBase/wsNorm`。`wsUrl` は `getWsBase()` 使用。
+- `room_app.js`: `wsForm()`（QR 表示は `qrInto` = v2.2 §26 の 2 モジュール白縁検証済み画像）。ホームボタン。boot で復元。
+- locale: `btn.ws`/`ws.*`/`msg.ws.*`（ja/en）。
+
+### テスト（「SPEC OK」）
+- `wsBtn`/`wsDefaultEmpty`/`wsBaseDefault`（=site origin）/ `wsQrQuiet`（TMIWS1: prefix・四周 4px 白縁）/ `wsApplied`（http→ws 正規化）/ `wsPersist`（reload 後も AppSettings 経由・debounce 500ms 考慮）/ `wsScanPng`（QR PNG 生成→scanFlow ファイル経路→`wss:` 変換）/ `wsResetDefault`。
+- カメラ読取自体は headless のため PNG 経路で検証（カメラ経路は §5.4 と同一実装）。

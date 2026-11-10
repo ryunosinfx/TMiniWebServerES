@@ -92,7 +92,25 @@ export const ridOf = async nameB64U => {
 };
 
 // 仕様 §9.6/§5.1: QR 経由での部屋指定は #<部屋名b64url>。rid はここで再計算
-export const wsUrl = rid => `${location.origin}/ws/chat/${rid}`;
+// v2.4 §28: WebSocket ベース URL は既定このサイト。上書きは AppSettings('WSBASE') 永続（wsNorm で正規化）
+export const WS_PREFIX = 'TMIWS1:';
+let wsBase = '';
+export const setWsBase = v => {
+	wsBase = typeof v === 'string' ? v.trim().replace(/\/+$/, '') : '';
+};
+export const getWsBase = () => wsBase || location.origin;
+export const wsNorm = raw => { // http→ws / https→wss。ws(s) はそのまま。不正は ''
+	try {
+		const s = (raw || '').trim();
+		if (!/^(wss?|https?):\/\//i.test(s)) return '';
+		const u = new URL(s),
+			p = u.protocol === 'wss:' || u.protocol === 'ws:' ? u.protocol : u.protocol === 'https:' ? 'wss:' : 'ws:';
+		return (p + '//' + u.host + u.pathname).replace(/\/+$/, '');
+	} catch (e) {
+		return '';
+	}
+};
+export const wsUrl = rid => `${getWsBase()}/ws/chat/${rid}`;
 
 // 仕様 §6.4 QR ペイロード: TMIWR1:<ridB64U の代わりに部屋名b64url>:<password>（ASCII のみ）
 export const QR_PREFIX = 'TMIWR1:';

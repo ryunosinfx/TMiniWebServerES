@@ -613,6 +613,52 @@ ck('pwLabel', (await D2.locator('.ir-frm label:has-text("パスワード")').cou
 const un = await D2.inputValue('input[name="ir-cuid"]');
 ck('nameRandom', un.length > 0 && (await D2.evaluate(x => (window.__IRAPP.cfg.names || []).includes(x), un)), un);
 await D2.close();
+// ---- v2.4 §28: WebSocket URL 設定（既定=サイト・QR 表示/変更/読取）----
+const P3 = await A.context().newPage();
+await P3.goto(BASE + '/img_room.html');
+await P3.waitForSelector('button:has-text("⚙️ 接続設定")', { timeout: 15000 });
+ck('wsBtn', true);
+await P3.click('button:has-text("⚙️ 接続設定")');
+await P3.waitForSelector('input[name="ir-wsb"]', { timeout: 10000 });
+ck('wsDefaultEmpty', (await P3.inputValue('input[name="ir-wsb"]')) === '');
+ck('wsBaseDefault', await P3.evaluate(() => import('/modules/imgroom/ir_const.js').then(m => m.getWsBase() === location.origin)));
+await P3.click('.ir-mbx button:has-text("QR 表示")');
+await P3.waitForSelector('.ir-wsqr canvas.ir-qrimg', { timeout: 20000 });
+ck('wsQrQuiet', await P3.evaluate(() => {
+	const cv = document.querySelector('.ir-wsqr canvas.ir-qrimg');
+	if (!cv || !(cv.title || '').startsWith('TMIWS1:')) return false;
+	const S = cv.width,
+		g = cv.getContext('2d'),
+		d = g.getImageData(0, 0, S, S).data,
+		white = (x, y) => d[(y * S + x) * 4] >= 128;
+	for (let i = 0; i < S; i++) for (let o = 0; o < 4; o++) if (!(white(i, o) && white(i, S - 1 - o) && white(o, i) && white(S - 1 - o, i))) return false;
+	return true;
+}));
+await P3.fill('input[name="ir-wsb"]', 'http://example.local:9999');
+await P3.click('.ir-mbx button:has-text("適用")');
+await P3.waitForTimeout(400);
+ck('wsApplied', await P3.evaluate(() => import('/modules/imgroom/ir_const.js').then(m => m.getWsBase() === 'ws://example.local:9999')));
+await P3.waitForTimeout(900); // AppSettings 500ms debounce flush 待ち
+await P3.reload();
+await P3.waitForSelector('button:has-text("⚙️ 接続設定")', { timeout: 15000 });
+await P3.click('button:has-text("⚙️ 接続設定")');
+await P3.waitForSelector('input[name="ir-wsb"]', { timeout: 10000 });
+ck('wsPersist', (await P3.inputValue('input[name="ir-wsb"]')) === 'ws://example.local:9999');
+const png = await P3.evaluate(async () => {
+	const m = await import('/modules/qr_tool.js');
+	const r = await m.QRTool.make('TMIWS1:https://qrhost.example', { size: 320 });
+	return r.canvas.toDataURL('image/png').split(',')[1];
+});
+await P3.click('.ir-mbx button:has-text("QR 読取")');
+await P3.waitForSelector('.ir-mbx input[type="file"]', { timeout: 10000 });
+await P3.setInputFiles('.ir-mbx input[type="file"]', { name: 'ws.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+await P3.waitForTimeout(1500);
+const wsv = await P3.inputValue('input[name="ir-wsb"]');
+ck('wsScanPng', wsv === 'wss://qrhost.example', wsv);
+await P3.click('.ir-mbx button:has-text("サイト既定")');
+await P3.waitForTimeout(400);
+ck('wsResetDefault', await P3.evaluate(() => import('/modules/imgroom/ir_const.js').then(m => m.getWsBase() === location.origin)));
+await P3.close();
 
 console.log(JSON.stringify({ engine: name, room: ROOM, checks, errors }, null, 1));
 const bad = errors.length || Object.values(checks).some(v => !v);

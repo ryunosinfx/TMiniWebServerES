@@ -15,7 +15,7 @@ import { ImgProc, SliceCache } from '../img_proc.js';
 import { QRTool } from '../qr_tool.js';
 import { QRScan } from '../qr_scan.js';
 import { Toggle, Badge, Toast, useLabel } from '../widgets.js';
-import { CFG, STORAGE, ridOf, qrPack, qrUnpack, IR } from './ir_const.js';
+import { CFG, STORAGE, ridOf, qrPack, qrUnpack, IR, WS_PREFIX, getWsBase, setWsBase, wsNorm } from './ir_const.js';
 import { Protocol } from './ir_protocol.js';
 import { RoomSession } from './room_session.js';
 import { Hibernate } from './hibernate.js';
@@ -60,6 +60,7 @@ export class RoomApp {
 		this.qOverride(); // URL クエリ上書き（非永続）
 		this.store = new HashStore(this.cfg); // cfg 確定後に生成（HASH_ROUNDS 反映）
 		await I18N.init((AppSettings.cfg && AppSettings.cfg.LANG) || 'auto');
+		setWsBase(this.cfg.WSBASE || ''); // v2.4 §28: WS ベース URL（既定=このサイト）
 		I18N.onChange = () => this.redraw(); // §11 言語変更で全 UI 即時再描画
 		this.setCssVars();
 		this.mkShell();
@@ -332,6 +333,9 @@ export class RoomApp {
 		const bj = Vw.btn(row, { class: 'ir-btn' });
 		Vw.sT(bj, t('btn.join'));
 		Vw.click(bj, () => this.loginForm('', null));
+		const bw = Vw.btn(row, { class: 'ir-btn' }); // v2.4 §28: WebSocket URL 設定（QR 表示/変更/読み取り）
+		Vw.sT(bw, '⚙️ ' + t('btn.ws'));
+		Vw.click(bw, () => this.wsForm());
 	}
 	async homeLogin(nameB64U) { // §5.1 hash/QR 経由: 部屋ログイン画面
 		const list = await this.roomList();
@@ -557,6 +561,66 @@ export class RoomApp {
 		} catch (e) {
 			ef(e, 'room_app.saveLastDef');
 		}
+	}
+	// ---- v2.4 §28: WebSocket URL 設定フォーム（QR 表示・変更・カメラ/PNG 読取）----
+	wsForm() {
+		const box = this.dlg(t('ws.title'));
+		Vw.add(box, 'div', { class: 'ir-mut' }).textContent = t('ws.note');
+		const inp = Vw.ipt(box, { type: 'text', name: 'ir-wsb', placeholder: location.origin });
+		inp.value = (this.cfg && this.cfg.WSBASE) || '';
+		const baseOf = () => {
+			const v = inp.value.trim();
+			return v ? wsNorm(v) || v : location.origin;
+		};
+		const qrHost = Vw.div(box, { class: 'ir-wsqr' });
+		const draw = async () => {
+			await this.qrInto(qrHost, WS_PREFIX + baseOf(), { file: 'ws_url_qr.png' });
+		};
+		const apply = async () => {
+			const raw = inp.value.trim();
+			if (raw && !wsNorm(raw)) {
+				Toast(t('msg.ws.bad'));
+				return;
+			}
+			const norm = raw ? wsNorm(raw) : '';
+			inp.value = norm;
+			setWsBase(norm);
+			this.cfg.WSBASE = norm;
+			AppSettings.set('WSBASE', norm).catch(e => ef(e, 'room_app.wsbase'));
+			Toast(t('msg.ws.set') + ' ' + getWsBase());
+			draw().catch(e => ef(e, 'room_app.wsQr'));
+		};
+		const r1 = Vw.div(box, { class: 'ir-row' });
+		const bQr = Vw.btn(r1, { class: 'ir-btn' });
+		Vw.sT(bQr, t('ws.btn.qr'));
+		Vw.click(bQr, () => {
+			draw().catch(e => ef(e, 'room_app.wsQr'));
+		});
+		const bScan = Vw.btn(r1, { class: 'ir-btn' });
+		Vw.sT(bScan, t('ws.btn.scan'));
+		Vw.click(bScan, () => this.scanFlow(raw => {
+			let v = raw || '';
+			if (v.startsWith(WS_PREFIX)) v = v.slice(WS_PREFIX.length);
+			const n = wsNorm(v);
+			if (!n) {
+				Toast(t('msg.ws.bad'));
+				return;
+			}
+			inp.value = n;
+			Toast(t('msg.ws.got'));
+			draw().catch(e => ef(e, 'room_app.wsQr'));
+		}));
+		const bAp = Vw.btn(r1, { class: 'ir-btn' });
+		Vw.sT(bAp, t('ws.btn.apply'));
+		Vw.click(bAp, () => {
+			apply().catch(e => ef(e, 'room_app.wsApply'));
+		});
+		const bDef = Vw.btn(r1, { class: 'ir-btn' });
+		Vw.sT(bDef, t('ws.btn.default'));
+		Vw.click(bDef, () => {
+			inp.value = '';
+			apply().catch(e => ef(e, 'room_app.wsDefault'));
+		});
 	}
 	async roomExists(rid) {
 		if (!this.opfsOk) return false;
