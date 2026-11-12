@@ -175,6 +175,11 @@ export class Collection {
 		if (this._dirty) this._dirty.add.push(e); // v1.5: saveManifest で 1 行追記
 		return true;
 	}
+	// v2.13 §40: 既存 meta を自房 manifest に採用（取得保持モード）。meta 自体は書かない（既に存在）
+	adopt(meta) {
+		if (!meta || !meta.h) return false;
+		return this._manifestAdd(meta);
+	}
 	_manifestRemove(h10) {
 		const i = this.manifest.findIndex(e => e && e.h === h10);
 		if (i < 0) return false;

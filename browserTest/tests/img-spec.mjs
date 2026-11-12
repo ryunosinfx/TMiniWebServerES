@@ -23,7 +23,12 @@ const mk = async label => {
 };
 const A = await mk('A'), B = await mk('B');
 const checks = {};
-const ck = (k, v) => (checks[k] = !!v);
+const ck = (k, v) => {
+	checks[k] = !!v;
+	if (!checks[k]) console.log('CHECKFAIL ' + k);
+	return checks[k];
+};
+process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filter(k => !checks[k]).join(',') || 'none')); // クラッシュ時も判明分を必ず出す
 
 const shot = async (pages, tags, file) => {
 	const bufs = [];
@@ -915,7 +920,18 @@ ck('fileCursor', await D9.evaluate(() => {
 await D9.click('button[aria-label="部屋設定"]');
 await D9.waitForSelector('.ir-mbx h3', { timeout: 10000 });
 await D9.click('.ir-mbx button:has-text("退室")'); // 退室後、再度ログイン（平文 pw 非保持）→ 発行前はボタン無効
-await D9.waitForFunction(() => [...document.querySelectorAll('.ir-btn')].some(b => (b.textContent || '') === 'ログイン'), null, { timeout: 15000 }); // ホームの部屋一覧から再ログイン
+try {
+	await D9.waitForFunction(() => [...document.querySelectorAll('button')].some(b => (b.textContent || '').trim() === '部屋作成'), null, { timeout: 40000 }); // ホーム再描画待ち（退室後のカードは「ログイン」または rl クリアで「参加」）
+await D9.locator('.ir-btn:has-text("ログイン"), .ir-btn:has-text("参加")').first().click();
+} catch (err918) {
+	console.log('leaveDiag', JSON.stringify(await D9.evaluate(() => ({
+		hash: location.hash,
+		mbx: !!document.querySelector('.ir-mbx'),
+		toast: [...document.querySelectorAll('.ir-toast')].map(x => (x.textContent || '').slice(0, 60)),
+		btns: [...document.querySelectorAll('button')].map(b => (b.textContent || '').trim()).slice(0, 30),
+	}))));
+	throw err918;
+}
 await D9.locator('.ir-btn:has-text("ログイン")').first().click();
 await D9.waitForSelector('.ir-frm input[name="ir-pw"]', { timeout: 10000 });
 await D9.fill('input[name="ir-nm"]', DR);
@@ -931,6 +947,111 @@ ck('pwCopyDisabled', await D9.evaluate(() => {
 	return !!cp && cp.disabled === true;
 }));
 await D9.close();
+// ---- v2.13 §40: モード keep（通常・取得保持）: 取得後 OPFS 永続化+manifest 採用で保持者化 ----
+const Aroom = await A.evaluate(() => {
+	const c = window.__IRAPP.activeCtx(),
+		e = c.collection.manifest.find(x => x && x.h) || {};
+	return { nm: c.room.nm, h: e.h || '' }; // nm は b64url 形式の可能性あり→参加にはテスト変数 ROOM を使う
+});
+ck('keepH10Ready', !!Aroom.h);
+const CURPW = await A.evaluate(() => window.__IRAPP.activeCtx().plainPw || ''); // §26 で再発行済み: 現行平文 pw を作成者セッションから取る
+ck('keepPwKnown', !!CURPW);
+const K1 = await mk('K1');
+await K1.goto(BASE + '/img_room.html');
+await K1.click('button:has-text("参加")');
+ck('keepRadio', await K1.evaluate(() => !!document.querySelector('input[name="ir-mode"][value="keep"]')));
+await K1.check('input[name="ir-mode"][value="keep"]');
+await K1.fill('input[name="ir-nm"]', ROOM);
+await K1.fill('input[name="ir-uid"]', 'KEE');
+await K1.fill('input[name="ir-pw"]', CURPW);
+await K1.click('.ir-frm button:has-text("ログイン")');
+try {
+	await K1.waitForSelector('input[type=file]', { timeout: 30000 });
+} catch (eK1j) {
+	console.log('kJoinDiag', await K1.evaluate(() => (document.querySelector('.ir-retry, .ir-mbx')?.textContent || document.body.textContent || '').slice(0, 300)));
+	throw eK1j;
+}
+console.log('kRidDbg', JSON.stringify({ Aroom: Aroom.nm, krid: await K1.evaluate(() => window.__IRAPP.activeCtx().rid), arid: await A.evaluate(() => window.__IRAPP.activeCtx().rid), khash: await K1.evaluate(() => location.hash) }));
+const kState = () => {
+	const c = window.__IRAPP.activeCtx(),
+		own = new Set(c.collection.manifest.map(e => e.h));
+	return {
+		ps: c.session.state.participants.map(x => x.uid),
+		th: document.querySelectorAll('.ir-thumb').length,
+		srcs: document.querySelectorAll('.ir-thumb img[src]').length,
+		nonOwnSrc: [...document.querySelectorAll('.ir-thumb img[src]')].filter(el => { const t = el.closest('.ir-thumb'); return t && t.dataset.h10 && !own.has(t.dataset.h10); }).length,
+		metas: c.collection.metas.size,
+		mset: c.collection.mset.size,
+	};
+};
+try {
+	await K1.waitForFunction(() => {
+		const c = window.__IRAPP.activeCtx(),
+			own = new Set(c.collection.manifest.map(e => e.h));
+		return [...document.querySelectorAll('.ir-thumb img[src]')].some(el => {
+			const t = el.closest('.ir-thumb');
+			return !!t && !!t.dataset.h10 && !own.has(t.dataset.h10);
+		});
+	}, null, { timeout: 45000 });
+} catch (e961) {
+	console.log('kDiag', JSON.stringify(await K1.evaluate(kState)));
+	console.log('aDiag', JSON.stringify(await A.evaluate(() => {
+		const c = window.__IRAPP.activeCtx();
+		return { ps: c.session.state.participants.map(x => x.uid), mode: c.mode, th: document.querySelectorAll('.ir-thumb').length, mset: c.collection.mset.size };
+	})));
+	throw e961;
+}
+const kh = await K1.evaluate(() => {
+	const c = window.__IRAPP.activeCtx(),
+		own = new Set(c.collection.manifest.map(e => e.h)),
+		el = [...document.querySelectorAll('.ir-thumb')].find(e => e.dataset.h10 && !own.has(e.dataset.h10));
+	return el ? el.dataset.h10 : '';
+});
+ck('keepSeeThumb', !!kh);
+await K1.click(`.ir-thumb[data-h10="${kh}"]`);
+await K1.waitForSelector('.ir-mbx img[src]', { timeout: 20000 });
+await K1.click('.ir-mclose');
+await K1.waitForTimeout(1200);
+ck('keepAdopt', await K1.evaluate(async h => {
+	const app = window.__IRAPP,
+		c = app.activeCtx();
+	return c.collection.mset.has(h) && !!(await app.store.get(h));
+}, kh));
+await A.waitForTimeout(2500); // シート配信（スロットル）で A 側 holders に収束
+ck('keepHolders', await A.evaluate(o => {
+	const c = window.__IRAPP.activeCtx(),
+		ho = c.collection.holdersOf(o.h);
+	return !!ho && ho.uids.includes(o.uidK);
+}, { uidK: 'KEE', h: kh })); // K1 が開いたのと同じ h10 で保持者判定する
+const N9 = await mk('N9');
+await N9.goto(BASE + '/img_room.html');
+await N9.click('button:has-text("参加")'); // 通常（都度取得）対照: manifest 採用しない
+await N9.fill('input[name="ir-nm"]', ROOM);
+await N9.fill('input[name="ir-uid"]', 'NRM9');
+await N9.fill('input[name="ir-pw"]', CURPW);
+await N9.click('.ir-frm button:has-text("ログイン")');
+await N9.waitForSelector('input[type=file]', { timeout: 30000 });
+await N9.waitForFunction(() => {
+	const c = window.__IRAPP.activeCtx(),
+		own = new Set(c.collection.manifest.map(e => e.h));
+	return [...document.querySelectorAll('.ir-thumb img[src]')].some(el => {
+		const t = el.closest('.ir-thumb');
+		return !!t && !!t.dataset.h10 && !own.has(t.dataset.h10);
+	});
+}, null, { timeout: 45000 });
+const nh = await N9.evaluate(() => {
+	const c = window.__IRAPP.activeCtx(),
+		own = new Set(c.collection.manifest.map(e => e.h)),
+		el = [...document.querySelectorAll('.ir-thumb')].find(e => e.dataset.h10 && !own.has(e.dataset.h10));
+	return el ? el.dataset.h10 : '';
+});
+await N9.click(`.ir-thumb[data-h10="${nh}"]`);
+await N9.waitForSelector('.ir-mbx img[src]', { timeout: 20000 });
+await N9.click('.ir-mclose');
+await N9.waitForTimeout(1200);
+ck('normalNoAdopt', await N9.evaluate(h => window.__IRAPP.activeCtx().collection.mset.has(h) === false, nh));
+await N9.close();
+await K1.close();
 
 console.log(JSON.stringify({ engine: name, room: ROOM, checks, errors }, null, 1));
 const bad = errors.length || Object.values(checks).some(v => !v);

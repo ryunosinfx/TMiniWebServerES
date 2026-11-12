@@ -360,7 +360,7 @@ export class RoomApp {
 		// モード選択（サーバーはログイン時のみ、srvOn=false 部屋では disabled、§5.1/§5.7/§6.8）
 		Vw.add(f, 'label').textContent = t('lbl.mode');
 		const mr = Vw.div(f, { class: 'ir-row' });
-		const modes = [['normal', 'hdr.mode.normal'], ['sync', 'hdr.mode.sync'], ['server', 'hdr.mode.server']];
+		const modes = [['normal', 'mode.normal.fetch'], ['keep', 'mode.normal.keep'], ['sync', 'hdr.mode.sync'], ['server', 'hdr.mode.server']]; // v2.13 §40: keep 追加
 		const radios = {};
 		for (const [m, key] of modes) {
 			const lb = Vw.add(mr, 'label', { class: 'ir-rd' });
@@ -1000,6 +1000,20 @@ export class RoomApp {
 		this.rooms.set(rid, ctx);
 		return ctx;
 	}
+	// v2.13 §40: 取得保持モード — 本文取得完了で OPFS 永続化+manifest 採用（自が保持者化: 以降ローカル優先・他機へも供給可）
+	async keepAdopt(ctx, h10, ab) {
+		try {
+			await this.store.put(ab);
+			this.usageDirty();
+			const meta = ctx.collection.metas.get(h10) || await this.store.metaGet(h10);
+			if (meta && ctx.collection.adopt(meta)) {
+				await ctx.collection.saveManifest();
+				await ctx.sheet.rebuild(ctx.collection.manifestEntries()); // 変更シートのみ queueBroadcast（§8.6 スロットル）
+			}
+		} catch (e) {
+			ef(e, 'room_app.keepAdopt');
+		}
+	}
 	bodyOf(h10) { // RoomCalendar img.bodyOf 注入（未取得は undefined → 空白）
 		return this.store.get(h10).then(ab => (ab ? ImgProc.ab2blob(ab) : null)).catch(() => null);
 	}
@@ -1148,7 +1162,7 @@ export class RoomApp {
 		};
 		const calHost = Vw.div(zone, {});
 		if (!ctx.cal) {
-			ctx.cal = new RoomCalendar({ parent: calHost, cfg: this.cfg, collection: ctx.collection, slices: { slicesOf: (u, i) => ctx.sheet.slicesOf(u, i) }, transfer: ctx.transfer, img: { bodyOf: h10 => this.bodyOf(h10) } });
+			ctx.cal = new RoomCalendar({ parent: calHost, cfg: this.cfg, collection: ctx.collection, slices: { slicesOf: (u, i) => ctx.sheet.slicesOf(u, i) }, transfer: ctx.transfer, img: { bodyOf: h10 => this.bodyOf(h10) }, keep: ctx.mode === 'keep', afterBody: (h10, ab) => this.keepAdopt(ctx, h10, ab) });
 			ctx.cal.sc.max = ctx.mode === 'server' ? (this.cfg.SRV_SCACHE_MAX || 8) : (this.cfg.SCACHE_MAX || 64); // サーバーモード低メモリ化 v1.3
 			ctx.cal.onBody = (h10, blob) => this.viewer(h10, blob); // §5.4 ビューア橋渡し
 			ctx.cal.setMode(this.cfg.CAL_VIEW || 'month');

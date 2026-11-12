@@ -31,11 +31,13 @@ export class RoomCalendar {
 	 * img: 任意。bodyOf(h10)->Promise<Blob|null>（thumb 索引なし項目の遅延生成用）
 	 * onBody: 設定可。fn(h10, blob) — サムネイルクリックで fetchBody 成功時に呼ぶ（ビューアは呼び出し側）
 	 */
-	constructor({ parent, cfg, collection, slices, transfer, img } = {}) {
+	constructor({ parent, cfg, collection, slices, transfer, img, keep, afterBody } = {}) {
 		this.cfg = { ...CFG, ...(cfg || {}) };
 		this.col = collection || null;
 		this.sl = slices || null;
 		this.tr = transfer || null;
+		this.keep = keep === true; // v2.13 §40: 取得保持（ローカル優先+取得後 afterBody）
+		this.afterBody = typeof afterBody === 'function' ? afterBody : null;
 		this.img = img || null;
 		this.dead = false;
 		this.onBody = null;
@@ -322,6 +324,10 @@ export class RoomCalendar {
 	fetchBody(h10) {
 		if (this.dead || !h10) return Promise.resolve(null);
 		const run = async () => {
+			if (this.keep && this.img && typeof this.img.bodyOf === 'function') { // v2.13 §40: 保持済みは転送せずローカルから（全保持者不参加でも表示可）
+				const b1 = await this.img.bodyOf(h10);
+				if (b1) return b1;
+			}
 			const ho = this.col && typeof this.col.holdersOf === 'function' ? this.col.holdersOf(h10) : null;
 			if (ho && ho.allDeparted) { // 全保持者不参加: 取得不能（§5.5/§12）
 				if (!this.dead) Toast(I18N.t('msg.offline.gray'));
@@ -344,6 +350,7 @@ export class RoomCalendar {
 				this.clearProg(h10);
 				if (this.dead) return null;
 				if (!ab) { Toast(I18N.t('msg.fetch.fail')); return null; } // 失敗: null + Toast
+				if (this.keep && this.afterBody) await Promise.resolve(this.afterBody(h10, ab)).catch(() => {}); // v2.13 §40: 永続化+manifest 採用（失敗は注入側でログ）
 				return new Blob([ab]); // transfer.fetch は ArrayBuffer 解決 → Blob 化
 			} catch (e) {
 				this.clearProg(h10);

@@ -15,7 +15,7 @@ import { Protocol } from './ir_protocol.js';
 const MONTH_MARGIN_MS = 5000; // 月境界タイマの余裕（翌月 UTC 0 時+offset、タスク指示）
 const OWN_WAIT_MS = 800; // 所有者選出確定待ち（login 前に owner/mirror を確定させる）
 const LG_REPLY_MS = 20000; // ミラー→オーナー login 委譲の応答待ち
-const MODES = ['normal', 'sync', 'server'];
+const MODES = ['normal', 'keep', 'sync', 'server']; // v2.13 §40: keep=通常（取得保持）。salt 等は normal と同一扱い
 
 export class RoomSession {
 	constructor({ rid, room, uid, mode, settings, transfer } = {}) {

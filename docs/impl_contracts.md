@@ -204,7 +204,7 @@ Protocol.pages(mEntries, max=64) -> [[...]]  // M フレームページ分割（
 ### room_session.js — `export class RoomSession`
 仕様 §6, §8.2, §9.1, §9.7, §9.12, §6.7〜6.9 準拠。セッション所有者/ミラーの選出は `StoreTX`（lock name: `room.<rid>`）+ BC `imgroom.session.<rid>`。
 ```
-new RoomSession({ rid, room:{nm,pw?,pwSalt?,srvOn,cr,cg,xorig,oa}, uid, mode:'normal'|'sync'|'server',
+new RoomSession({ rid, room:{nm,pw?,pwSalt?,srvOn,cr,cg,xorig,oa}, uid, mode:'normal'|'keep'|'sync'|'server', // keep=通常（取得保持）v2.13 §40、salt 等は normal と同一
                   settings(AppSettings), transfer(FileTransfer) })
   .login({password?, seed?, salt, mode}) -> Promise<boolean>   // W 送信→全採決 OK で true。seed 既定は pwSalt が有効期間内なら room.json 保管値
   .rejoin() -> Promise<boolean>                                 // §9.12 自動再参加（pwSalt 期間内のみ）
@@ -237,12 +237,13 @@ new Collection({ rid, uid, store(HashStore), session(RoomSession) })
   .trash(h10) / .restore(h10) / .purge(h10) / .trashList() / .emptyTrash() / .sweepIfNeeded()
   .onDeleteX(xframe)                          // meta r から当該 rid 除去、自房削除通知
   .isTrashed(h10)
+  .adopt(metaObj) -> boolean            // v2.13 §40: 既存 meta を自房 manifest に採用（keep 取得後。重複時 false）
 ```
 
 ### room_calendar.js — `export class RoomCalendar`
 仕様 §5.5: CalView + VirtList 窓 + スライス表示 + 取得インジケーター + グレースケール + クリック→本体取得。
 ```
-new RoomCalendar({ parent, cfg, cal(CalView), slices(SliceCache), collection, transfer, session })
+new RoomCalendar({ parent, cfg, cal(CalView), slices(SliceCache), collection, transfer, session, keep, afterBody }) // keep/afterBody v2.13 §40: 本体取得のローカル優先+取得後永続化フック
   .setItems(items)  // collection.roomItems()
   .fetchBody(h10)   // 優先度付き（ユーザー操作）→ transfer.fetch → viewer 表示
   .refresh()

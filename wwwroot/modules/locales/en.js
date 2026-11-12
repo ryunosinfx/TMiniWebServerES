@@ -6,6 +6,8 @@ export default {
 	'hdr.mode.normal': 'Normal',
 	'hdr.mode.sync': 'Sync',
 	'hdr.mode.server': 'Server',
+	'mode.normal.fetch': 'Normal (fetch each time)',
+	'mode.normal.keep': 'Normal (keep fetched)',
 	'hdr.lang': 'Language',
 	'btn.trash': 'Trash',
 	'btn.bulkdl': 'Bulk DL',

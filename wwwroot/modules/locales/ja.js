@@ -6,6 +6,8 @@ export default {
 	'hdr.mode.normal': '通常',
 	'hdr.mode.sync': '同期',
 	'hdr.mode.server': 'サーバー',
+	'mode.normal.fetch': '通常（都度取得）',
+	'mode.normal.keep': '通常（取得保持）',
 	'hdr.lang': '言語',
 	'btn.trash': 'ゴミ箱',
 	'btn.bulkdl': '一括 DL',

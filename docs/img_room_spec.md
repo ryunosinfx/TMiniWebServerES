@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.12
+- ステータス: ドラフト v2.13
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1322,3 +1322,21 @@ ponta 側を**強制再読込**したうえで再試行するとコンソール�
 
 ### テスト（「SPEC OK」）
 - `pwCopyPos`（メニューでボタンが QR より後方 DOM かつ有効）/ `pwCopyDisabled`（作成者が退室→再ログイン後は平文 pw 非保持でボタン disabled=true）/ `scanNote`（説明に「部屋名とパスワード」）/ `fileCursor`（ファイル入力の computed cursor=pointer）。
+
+## 40. 追加仕様 v2.13: モード keep（通常・取得保持）
+要求（2026-11-13）: 通常モードを 2 種に分ける。**通常（都度取得）**=現行（画像本文はそのつど保持者から P2P 取得）。**通常（取得保持）`= 一度取得した画像本文を OPFS に保存し、以降はローカルから表示する。
+
+- **モード値**: `MODES = ['normal','keep','sync','server']`。`keep` は認証ゲートで normal と完全に同一扱い（salt=UTC 月、オリジン照合あり、§6.2）。既存の J/W/O/C 送信経路・rejoin・MODE.<rid> 記憶はそのまま流用。
+- **挙動（RoomCalendar.fetchBody）**:
+  1. `keep` は**ローカル優先**: `store.get(h10)` に本体があれば転送せず即表示（全保持者不参加でも表示可。allDeparted のグレー Toast も出ない）。
+  2. P2P 取得成功時 `afterBody(h10, ab)`（room_app.keepAdopt）で **①OPFS 本文保存（store.put+usageDirty）②Collection.adopt(meta) で自房 manifest に採用 → saveManifest → sheet.rebuild で配信**。以後この端末も**保持者**となり、他参加者に供給側として振る舞える（§9.1 の保持者集合が配布で膨らむ設計）。
+  3. 取得失敗・採決等の他ゲートは normal と同一。
+- **`Collection.adopt(meta)`（新 API・契約更新済み）**: 既存 meta を manifest エントリとして追加（`_manifestAdd` 再利用、meta 自体は書かない、重複は false）。
+- **UI**: 参加/ログインフォームのモード radio に「通常（取得保持）」追加（既定は normal のまま）。ラベルは `mode.normal.fetch`/`mode.normal.keep`（ヘッダの同期切替は従来通り normal/sync の 2 値のみで、keep ユーザーが切ると normal/sync に移行）。
+- **互換**: 更新前クライアントの部屋では `keep` 参加者は `gate=mode` で拒否される（§35 監査ログに記録）。両端末の更新が必要。
+- **保存容量**: 取得保持は取得した分だけ OPFS 使用量が増える（usage メータ表示。自動削除はせず、ゴミ箱スイープ §9.8 は削除済みアイテムのみ）。
+- **ビューアの自動保存（v1.x 追加仕様）との関係**: 表示時の store.put は全モード共通で従来通り。keep の違いは **manifest 採用＝保持者化とローカル優先表示**にある（都度取得では manifest に入らないため再取得になる）。
+
+### テスト（「SPEC OK」）
+- `keepRadio`（radio 出現）/ `keepSeeThumb` / `keepAdopt`（開封後 mset+store.get 実在）/ `keepHolders`（**同じ h10** で A 側 holdersOf に KEE が入る）/ `normalNoAdopt`（通常は mset 不変の対照）。
+- テスト運用教訓: ①部屋作成後の**パスワード発行**でテスト変数の PW は失効する→作成者セッションの `plainPw` を読む ②`room.nm` は b64url 形式のことがあり参加入力には plaintext 変数を使う ③クラッシュ時も ck 結果が見えるよう `CHECKFAIL` 即时出力と `process.on('exit')` サマリを追加。
