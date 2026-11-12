@@ -87,6 +87,7 @@ export default {
 	'diag.origin': 'This page origin',
 	'diag.mode': 'Mode',
 	'diag.hint': 'Different origins (127.0.0.1 vs LAN IP, domain, port…) fail unless the creator enables cross-origin and registers this origin in allowed origins, or you join via the same URL from the room URL QR. If the password was reissued from the room menu, use the new one ("Copy password only")',
+	'msg.seed.legacy': 'This room was created by a pre-v2.11 client (legacy seed). If joining fails, log in alone, use "issue password" in the room menu, then join with the new password',
 	'btn.copy': 'Copy',
 	'btn.scan': 'Scan QR',
 	'btn.qr.png': 'Save PNG',

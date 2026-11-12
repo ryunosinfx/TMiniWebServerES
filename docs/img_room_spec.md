@@ -1300,6 +1300,7 @@ ponta 側を**強制再読込**したうえで再試行するとコンソール�
 - `AuthChallenge.seed(password, ridB64U, salt, rounds)` → **`H.d(password + '|' + ridB64U + '|' + salt, rounds)`**。呼び出し 3 箇所（doCreate / 再発行 / `_seedOf`）から `location.origin` 引数を削除。
 - オリジン統制は **§6.2 検証 2 のみ**（xorig=false → 各メンバーの自オリジン 1 個、xorig=true → oa に列挙されたオリジンの ho/hor と一致）。これで §6.6 の記述どおり **xorig=true + oa 登録の部屋では別オリジン参加が成立**し、xorig=false は従来どおり別オリジンを拒否。
 - **互換性（破壊的）**: v2.10 以前の seed（origin 込み）を保管する既存部屋は、v2.11 クライアントと一致しない。対処は (a) 作成者が**パスワード発行**（新 seed 生成・C 配信で全成员更新）するか、(b) 部屋を作り直す。**自動マイグレーションは持たない**（§15.9 のサーバー不変方針の下、保管 seed からの式変換は平文不在で不可）。
+- **seedV 版印（20261112d.log の運用観察で追加）**: OPFS の room.json はクライアント更新で書き換わらないため、更新前クライアントが作った部屋の seed（旧式）が残り `gate=pw` で失敗する事例を確認。以後の保存（`_saveRoom`/`pushC`）は **`seedV: 2`** を刻み、ログイン時 `room.pw` あり & `seedV !== 2` ならトースト `msg.seed.legacy`（単独入室→パスワード発行→新パスワードで参加、の案内）を表示。既存の旧 room.json は自動検出・案内のみで自動変換しない（平文不在で変換不能のため）。
 
 ### ユーザー環境（panco@GitHub Pages ↔ ponta@local）の正しさの筋
 1. 両側を v2.11 クライアントへ**強制再読込**（キャッシュ注意）。

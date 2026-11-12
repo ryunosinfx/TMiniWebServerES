@@ -898,11 +898,12 @@ export class RoomSession {
 			ef(e, 'room_session.room.' + this.rid); // 不存在は空ファイル → 設定なし（未作成部屋）
 		}
 	}
+	// v2.11 §38: room.json に seed 方式版印 seedV:2 を刻む（更新前クライアント由来の旧 seed との混同検知用）
 	async _saveRoom(pw, pwSalt) {
 		if (!this._owner) return;
 		this.room.pw = pw || '';
 		this.room.pwSalt = pwSalt || '';
-		const o = { rid: this.rid, nm: this.room.nm, pw: this.room.pw, pwSalt: this.room.pwSalt, srvOn: !!this.room.srvOn, cr: this.room.cr, cg: this.room.cg || 0, xorig: !!this.room.xorig, oa: this.room.oa || [], mx: +this.room.mx || 0 };
+		const o = { rid: this.rid, nm: this.room.nm, pw: this.room.pw, pwSalt: this.room.pwSalt, srvOn: !!this.room.srvOn, cr: this.room.cr, cg: this.room.cg || 0, xorig: !!this.room.xorig, oa: this.room.oa || [], mx: +this.room.mx || 0, seedV: 2 };
 		if (this.room.conflict) o.conflict = T; // §6.9 競合時 conflict: true 追記
 		await OPFS.w(STORAGE.roomFile(this.rid), Y.s2u(JSON.stringify(o)).buffer);
 	}

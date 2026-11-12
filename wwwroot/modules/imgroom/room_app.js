@@ -419,6 +419,7 @@ export class RoomApp {
 	}
 	async tryLogin({ rid, room, nb, uid, pw, mode, f }) {
 		pw = RoomApp.pwFromField(pw);
+		if (room && room.pw && room.seedV !== 2) Toast(t('msg.seed.legacy')); // v2.11 §38: 更新前クライアント由来の旧 seed 部屋
 		if (!rid) rid = await this.ridOfNb(nb); // 新規参加: 既存でなければ room.json は書かない（room_session の authOk 時保存想定）
 		const r = room || { nm: nb };
 		if (this.pendingNb) {
@@ -1786,7 +1787,7 @@ export class RoomApp {
 		try {
 			await OPFS.w(STORAGE.roomFile(ctx.rid), Y.s2u(JSON.stringify({
 				rid: ctx.rid, nm: ctx.room.nm, pw: o.pw, pwSalt: o.pwSalt, srvOn: o.srvOn,
-				cr: o.cr, cg: o.cg, xorig: o.xorig, oa: o.oa, mx: o.mx || 0,
+				cr: o.cr, cg: o.cg, xorig: o.xorig, oa: o.oa, mx: o.mx || 0, seedV: 2, // v2.11 §38: 現行 seed 方式の版印
 			})).buffer);
 		} catch (e) {
 			ef(e, 'room_app.saveRoom');
