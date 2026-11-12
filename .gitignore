@@ -14,3 +14,5 @@ browserTest/out/
 .ff-run/
 .ff-profile/
 browserTest/tests/err*.log
+.tmp/
+*.log
