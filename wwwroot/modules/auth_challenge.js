@@ -32,8 +32,12 @@ export class AuthChallenge {
 	// seedSaltedHash。§4 転記:
 	//   Y.B2U(H.d(password + '|' + ridB64U + '|' + origin + '|' + salt, HASH_ROUNDS))
 	// 再参加時は password の代わりに room.json 保管値（pw）を第一引数へ渡す（§6.2）
-	static async seed(password, ridB64U, origin, salt, rounds = DEF_ROUNDS) {
-		return Y.B2U(await H.d(password + '|' + ridB64U + '|' + origin + '|' + salt, rounds));
+	// v2.11 §38: **origin を seed から除去**（旧式 §4: password|ridB64U|origin|salt）。旧式では参加側 location.origin が
+	// seed に残るため、xorig=true の部屋でも別オリジン参加が §6.2 検証 3 で数学的に成立しなかった（§6.6 の意味を失う）。
+	// オリジン統制は検証 2（ho/hor と oa/自オリジン照合）が担う。§4 新式: Y.B2U(H.d(password + '|' + ridB64U + '|' + salt, HASH_ROUNDS))
+	// 再参加時は password の代わりに room.json 保管値（pw）を第一引数へ渡す（§6.2）
+	static async seed(password, ridB64U, salt, rounds = DEF_ROUNDS) {
+		return Y.B2U(await H.d(password + '|' + ridB64U + '|' + salt, rounds));
 	}
 	// 認証アテスト。§6.2 転記:
 	//   at = Y.B2U(H.d(ho + '|' + seed + '|' + hor + '|' + uid + '|' + salt + '|' + anonce, HASH_ROUNDS))

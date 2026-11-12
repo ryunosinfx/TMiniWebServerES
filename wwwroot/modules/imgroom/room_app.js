@@ -664,7 +664,7 @@ export class RoomApp {
 	async doCreate({ rid, nb, nmRaw, uid, pw, xorig, mx = 0 }) {
 		// 作成者は room.json に seed を保管 → session.login の初回採決不要ショートカット（§5.3/§6.2）
 		const salt = AuthChallenge.saltNormal();
-		const seed = await AuthChallenge.seed(pw, nb, location.origin, salt, this.cfg.HASH_ROUNDS);
+		const seed = await AuthChallenge.seed(pw, nb, salt, this.cfg.HASH_ROUNDS); // v2.11 §38: origin 無し
 		const room = { rid, nm: nb, pw: seed, pwSalt: salt, srvOn: false, cr: uid, cg: Date.now(), xorig: !!xorig, oa: [], mx: +mx || 0 };
 		await OPFS.w(STORAGE.roomFile(rid), Y.s2u(JSON.stringify(room)).buffer);
 		const ctx = await this.openRoom({ rid, nb, room, uid, mode: 'normal' });
@@ -1681,7 +1681,7 @@ export class RoomApp {
 			try {
 				const pw = await AuthChallenge.newPw(this.cfg.PW_BITS);
 				const salt = AuthChallenge.saltNormal();
-				const seed = await AuthChallenge.seed(pw, ctx.nb, location.origin, salt, this.cfg.HASH_ROUNDS);
+				const seed = await AuthChallenge.seed(pw, ctx.nb, salt, this.cfg.HASH_ROUNDS); // v2.11 §38: origin 無し
 				ctx.plainPw = pw;
 				ctx.room.pw = seed;
 				ctx.room.pwSalt = salt;

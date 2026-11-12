@@ -61,7 +61,7 @@ AppSettings.flush()                -> Promise<void>
 AuthChallenge.saltNormal(dateMs = Date.now()) -> "YYYYMM"    // UTC
 AuthChallenge.saltServer(dateMs = Date.now()) -> "YYYYMMDD"  // UTC（参加日）
 AuthChallenge.originHashes(origin, rounds) -> Promise<{ho, hor}>   // hor は文字列反転のハッシュ
-AuthChallenge.seed(password, ridB64U, origin, salt, rounds) -> Promise<b64url> // 仕様 §4 の seedSaltedHash
+AuthChallenge.seed(password, ridB64U, salt, rounds) -> Promise<b64url> // 仕様 §4 の seedSaltedHash（v2.11 §38 で origin 除去）
 AuthChallenge.at({ho, seed, hor, uid, salt, anonce}, rounds) -> Promise<b64url> // 仕様 §6.2
 AuthChallenge.newAnonce() -> b64url        // 16B 乱数
 AuthChallenge.newPw(bits = 512) -> Promise<b64url string>    // 仕様 §6.3

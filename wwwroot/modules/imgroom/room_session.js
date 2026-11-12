@@ -879,7 +879,7 @@ export class RoomSession {
 	_seedOf(password, salt) {
 		if (!password || !this.room.nm) return Promise.reject(new Error('room_session: nm/password required'));
 		// §4/§7.3: ridB64U は部屋名 b64url（= room.nm。QR に載る値）
-		return AuthChallenge.seed(password, this.room.nm, location.origin, salt, this._rounds());
+		return AuthChallenge.seed(password, this.room.nm, salt, this._rounds()); // v2.11 §38: origin 無し
 	}
 	async _loadRoom() {
 		if (!this._owner) return;

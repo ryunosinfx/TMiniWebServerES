@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.9
+- ステータス: ドラフト v2.11
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -183,7 +183,7 @@ wwwroot/
 | --- | --- |
 | 部屋（room） | 既存チャットの `<roomId>`。ユーザー入力名を BASE64URL 変換したものを roomId とする（§7.3） |
 | 作成者 (creator) | 部屋を最初に作成したユーザー。部屋設定（seedSaltedHash・作成者 uid）の更新・パスワード再発行権限を持つ |
-| seedSaltedHash (pwHash) | 平文パスワード由来の**シードソルトハッシュ** `Y.B2U(H.d(password + '|' + ridB64U + '|' + origin + '|' + salt, HASH_ROUNDS))`。ソルトは不変データ（部屋名 rid・オリジン）+ 期間（通常/同期: UTC `YYYYMM`、サーバー: 参加日 `YYYYMMDD`、§6.7）。**ログイン成功時に OPFS の room.json へ保管**し、再参加時は平文パスワードの代わりに、採決時は自分の保管値で joiner を検証するのに使う（§6.2）。期間外は無効。平文パスワードは保存・通信しない |
+| seedSaltedHash (pwHash) | 平文パスワード由来の**シードソルトハッシュ** `Y.B2U(H.d(password + '|' + ridB64U + '|' + salt, HASH_ROUNDS))`（**v2.11 §38 で origin を除去**。旧式は `…|ridB64U|origin|salt…`。オリジン統制は §6.2 検証 2 が担う）。ソルトは不変データ（部屋名 rid・オリジン）+ 期間（通常/同期: UTC `YYYYMM`、サーバー: 参加日 `YYYYMMDD`、§6.7）。**ログイン成功時に OPFS の room.json へ保管**し、再参加時は平文パスワードの代わりに、採決時は自分の保管値で joiner を検証するのに使う（§6.2）。期間外は無効。平文パスワードは保存・通信しない |
 | 本体 (body) | 共有対象の原画像バイナリ。**h10 をキーにクライアント内グローバルで 1 個** |
 | h10 | 画像バイト列（メタデータを一切含まない純粋なバイナリ）の SHA-256 ハッシュ `Y.B2U(H.d(bytes, 10))`（[OPFS.js](../wwwroot/OPFS.js) `OPFS.x` と同一方式）。本体 ID・重複排除キー兼用 |
 | メタデータ | 本体に紐づく付随情報（ファイル名・所属部屋リスト・投稿者・投稿時刻・MIME。§7.1）。h10 でインデックス |
@@ -1247,3 +1247,66 @@ msg  ≒ 11.0 KB
 
 ### テスト（「SPEC OK」）
 - `voteDenyPw`（同一オリジン誤パスワード → 投票者 A/B が gate=pw を監査ログ）/ `voteDenyOrigin`（**同一パスワードでも `http://localhost:8080` 参加 → gate=origin で棄却**、参加側は診断表示行き）/ `voteLogArr`（`session._voteLog` 配列記録）。
+
+## 36. 運用記録: 20261112a.log 解析と認証不一致の決定的手法（コード変更なし）
+ログ `.tmp/20261112a.log`（11-12 23:10 JST）:
+- panco の W 2 試行: `mode=normal`・`salt=202611`（妥当）→ ゲート 1 通過。**ho/hor は 11-11 ログと完全一致** → panco 側のブラウザ URL は前回から不変。
+- ponta は **約 2〜40ms で `ok:false`**（投票は即決。タイムアウトではない）。ponta の `gen` が 4→7 に増加＝セッション再読み込みを挟んでいる（その間に部屋再作成＝**新パスワード**が入った可能性がある）。
+- よって不 OK の真因は**ゲート 2（オリジン）またはゲート 3（パスワード）**。両ゲートとも「参加側が計算した seed = H(パスワード|部屋名b64url|**参加側 URL のオリジン**|salt)」が投票者の保管 seed と一致することが必要（§4/§6.2）。
+- 前回と同様、ho の総当たり（既知 LAN 範囲・一般ポート・既知ホスト名）で既知候補に不一致 → panco 側は一般想定外の表記（別ポート・マシン名・https 等）の可能性。**クライアント更新なし（HTTP キャッシュ）も常見の落とし穴**で、更新は強制再読込（Ctrl+Shift+R / 端末のキャッシュ消去）で行う。
+
+### 決定手法 A: 投票者（ponta）側の DevTools で at 再計算（パスワードを外部に出さない）
+入室中の ponta ページのコンソールに貼り付け（値は本ログのもの）:
+```js
+(async () => {
+	const s = window.__IRAPP.activeCtx().session,
+		A = await import('/modules/auth_challenge.js'),
+		L = [['i-3UDXQBmLUjV3cy9xcr6g', 'HTi1RORUAFxqwhlMmwuFcLct9_6-nNdfYcYVOgNqCUw'], ['Jiuw4MXbjP7NC3um4xhy8g', '9KfLUt6cM-IquYVLoSyhyWQgZnD5H4WbcEK1jcXlO5o']],
+		ho = 'HqUCkQuyzNfG_kpWzEionYJvz6Y-428Lkg7W4Wx6LYs', hor = 'KXOZk16_eki99b7aRCPUzP7bM4pigOu5NBi71kv8kqM';
+	for (const [an, want] of L)
+		console.log(an, await A.AuthChallenge.at({ ho, seed: s._pw, hor, uid: 'panco', salt: '202611', anonce: an }, s._rounds()) === want);
+})();
+```
+- 両行 `true` → panco が入力した**パスワード・部屋名・URL**が ponta の保管 seed と完全一致。この状態で拒否されるなら**クライアント版差（キャッシュ）または rounds 差**。
+- `false` → 3 要素（パスワード／部屋名／参加側 URL）のいずれかが ponta の部屋と違う。
+
+### 決定手法 B: 開発機での再現計算（`.tmp/atcalc.mjs`）
+`node .tmp/atcalc.mjs <部屋名> <panco が入力したパスワード> <panco のブラウザ URL（オリジン）>`
+→ `hoOK/horOK`（URL 判定）と `atOK`（パスワード・部屋名判定）を 2 試行分出力。`selftest` モードで検証済み。
+
+### 併用: 投票側ゲート監査ログ（§35、v2.9）
+ponta 側を**強制再読込**したうえで再試行するとコンソールに `[imgroom vote] deny uid=panco gate=origin|pw …` が出る。
+
+## 37. 追加仕様 v2.10: カーソル統一とクリックフィードバック（CSS）
+要求: 「ボタンはホバー時のカーソルをすべてポインターに」「クリックしたら分かるようなエフェクトを CSS で」
+
+- `css/imgroom.css` 末尾に全局ブロック追加:
+  - **カーソル**: `button/select/radio/checkbox`（非 disabled）は `cursor: pointer`、disabled は `default`+`opacity:.55`。既存の `.ir-mclose/.ir-rw/.ir-thumb` の個別指定と統合。
+  - **押下フィードバック**: `button:active:not(:disabled)` 等で `transform: scale(.955)` + `filter: brightness(.8)`。トランジション（transform .09s / filter .12s / box-shadow .2s）。
+  - **クリック瞬間の波紋**: `@keyframes ir-clickflash`（box-shadow 0→14px の半透明リング消滅）。`button:focus:not(:focus-visible)` に適用するため**マウスクリック時のみ発火し Tab/focus-visible では発火しない**（JS 不要・純 CSS）。
+- 影響確認: transform はレイアウト箱を変えないため v2.5 §30 の確認ボタン同寸検査（getBoundingClientRect）は非押下状態で影響なし。
+
+### テスト（「SPEC OK」）
+- `cursorPointer`（ページ内全有効 button/select/radio の computed cursor === pointer）/ `thumbPointer`（画像サムネイル）/ `clickFlash`（部屋設定ボタン実クリック直後の computed animationName === ir-clickflash）。
+
+## 38. 追加仕様 v2.11: seed から origin を除去 — クロスオリジン参加(xorig)の実際の成立
+調査経緯（ユーザーログ 20261111c/20261112b + `.tmp/atcalc.mjs`）: panco は **GitHub Pages（`https://ryunosinfx.github.io`）**でページを開き、接続設定（§29 の WSBASE）でローカル SampleServer に WS 接続。ponta はローカル(origin 別)。3 要素（URL・部屋名 testa・パスワード）を再計算したところ**ログの ho/hor/at と完全一致** → panco の入力は正しく、拒否は**ponta 保管 seed との不一致**と確定。
+
+### 判明した設計上の穴（v2.10 まで）
+- seedSaltedHash が `H(pw|部屋名b64url|**ページ origin**|salt)` で origin を含むため、**投票者は自分の seed でしか at を再計算できず、別オリジンの参加者（別 origin で seed を計算）の at は永久に一致しない**。§6.6 の xorig/oa は検証 2 を緩和するが検証 3 が残るため、**xorig を有効にしても別オリジン参加は成立しなかった**（テストにも未覆盖）。
+- 同時に、検証 2 の `ho/hor` は参加側申告値であり seed の origin 束縛も「正しい pw を持つ者」には同一 URL 前提で自明。**origin 束縛は実効的な追加防御を持たず、正当な別オリジン利用者だけを失敗させていた**。
+
+### v2.11 の変更（クライアントのみ）
+- `AuthChallenge.seed(password, ridB64U, salt, rounds)` → **`H.d(password + '|' + ridB64U + '|' + salt, rounds)`**。呼び出し 3 箇所（doCreate / 再発行 / `_seedOf`）から `location.origin` 引数を削除。
+- オリジン統制は **§6.2 検証 2 のみ**（xorig=false → 各メンバーの自オリジン 1 個、xorig=true → oa に列挙されたオリジンの ho/hor と一致）。これで §6.6 の記述どおり **xorig=true + oa 登録の部屋では別オリジン参加が成立**し、xorig=false は従来どおり別オリジンを拒否。
+- **互換性（破壊的）**: v2.10 以前の seed（origin 込み）を保管する既存部屋は、v2.11 クライアントと一致しない。対処は (a) 作成者が**パスワード発行**（新 seed 生成・C 配信で全成员更新）するか、(b) 部屋を作り直す。**自動マイグレーションは持たない**（§15.9 のサーバー不変方針の下、保管 seed からの式変換は平文不在で不可）。
+
+### ユーザー環境（panco@GitHub Pages ↔ ponta@local）の正しさの筋
+1. 両側を v2.11 クライアントへ**強制再読込**（キャッシュ注意）。
+2. ponta が部屋を**クロスオリジン許可 ON で再作成**（xorig は作成時固定 §6.6）。
+3. 部屋メニューの許可オリジン管理に `https://ryunosinfx.github.io` を追加（C 配信で伝搬）。
+4. panco は接続設定（WSBASE）でローカルリレーに接続したまま、部屋名と新しいパスワードで参加 → 検証 2 が oa で通過、検証 3 が origin 非依存で通過。
+
+### テスト（「SPEC OK」）
+- `xorigJoin`（xorig=true 部屋 + oa に `http://localhost:8080` 登録 → **localhost オリジン参加者が採決通過で入室**）/ `xorigDenyUnlisted`（同部屋に未登録 127.0.0.1 からの pw 正しくも拒否＝gate 2 が生きている）。既存 `voteDenyOrigin`（xorig=false 拒否）も維持。`wsNotInAuth` は v2.11 の seed 式（origin 無し）に更新。
+- flake 根治（本节で確定）: `fsKeyNext` 不安定の真因は **viewer() の `_h10` 代入は冒頭だが、fs クラス付与と `_fsWire` 配線完了は末尾(async)** なため、`_h10` 変化検知直後の検査で未完了になり得たこと。**送り後は毎回 `_fsWire===true && classList に ir-fs` を待つ**方式へ統一（キー送信の取りこぼし自体は §34 の即時登録で解消済み）。3 連走で安定緑。

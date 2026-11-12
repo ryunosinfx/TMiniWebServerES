@@ -444,6 +444,10 @@ try {
 		const b = window.__IRAPP._vBox;
 		return b && b._h10 !== h;
 	}, h0k, { timeout: 8000 });
+	await A.waitForFunction(() => { // v2.11: viewer() 末尾(async)の fs クラス付与/配線完了まで待つ（_h10 は冒頭で変わる）
+		const b = window.__IRAPP._vBox;
+		return b && b._fsWire === true && b.classList.contains('ir-fs');
+	}, null, { timeout: 8000 });
 } catch (e) {
 	movedK = false;
 	console.log('fsKeyDiag', JSON.stringify(await A.evaluate(h => {
@@ -462,7 +466,11 @@ await A.waitForFunction(h => {
 	const b = window.__IRAPP._vBox;
 	return b && b._h10 === h;
 }, h0k, { timeout: 8000 });
-ck('fsKeyPrev', true);
+await A.waitForFunction(() => {
+	const b = window.__IRAPP._vBox;
+	return b && b._fsWire === true && b.classList.contains('ir-fs');
+}, null, { timeout: 8000 }); // 同上（戻る送りでも配線待ち）
+ck('fsKeyPrev', await A.locator('.ir-mbx.ir-fs').count() === 1);
 await A.click('.ir-imgwrap');
 await A.waitForSelector('.ir-fsc', { timeout: 5000 });
 ck('confirmBtnSize', await A.evaluate(() => {
@@ -747,12 +755,13 @@ ck('wsNotInAuth', await A.evaluate(async () => {
 			salt = c.room.pwSalt,
 			r = c.session._rounds();
 		if (!pw || !salt) return false;
-		const sWeb = await AC.seed(pw, c.room.nm, location.origin, salt, r), // ページ=Web ホスト(origin)基準
+		// v2.11 §38: seed 式自体が origin を含まない。auth の origin 照合は常に Web origin 基準で、WS 接続先は無関係
+		const sWeb = await AC.seed(pw, c.room.nm, salt, r),
 			sSess = await c.session._seedOf(pw, salt), // 実セッションの seed 経路
-			sWs = await AC.seed(pw, c.room.nm, 'ws://elsewhere.example:9999', salt, r);
+			sSame = await AC.seed(pw, c.room.nm, salt, r);
 		const oh = await AC.originHashes(location.origin, r),
 			ohWs = await AC.originHashes('ws://elsewhere.example:9999', r);
-		return sWeb === sSess && sWeb !== sWs && !!oh.ho && !!oh.hor && oh.ho !== ohWs.ho; // 検証値は常に Web origin 基準で安定
+		return sWeb === sSess && sSess === sSame && !!oh.ho && !!oh.hor && oh.ho !== ohWs.ho; // 検証値は常に Web origin 基準で安定
 	} finally {
 		m.setWsBase('');
 	}
@@ -821,6 +830,63 @@ ck('voteLogArr', await A.evaluate(() => {
 	return vl.some(e => e.gate === 'origin' && e.uid === 'GLAB');
 }));
 await G.close();
+// ---- v2.10 §37: 全クリック要素 pointer カーソル / クリック波紋フィードバック ----
+ck('cursorPointer', await A.evaluate(() => {
+	const els = [...document.querySelectorAll('button:not(:disabled), select:not(:disabled), input[type="radio"]:not(:disabled)')];
+	return els.length > 5 && els.every(e => getComputedStyle(e).cursor === 'pointer');
+}));
+ck('thumbPointer', await A.evaluate(() => {
+	const t = document.querySelector('.ir-thumb');
+	return !!t && getComputedStyle(t).cursor === 'pointer';
+}));
+await A.click('button[aria-label="部屋設定"]');
+ck('clickFlash', await A.evaluate(() => {
+	const b = document.querySelector('button[aria-label="部屋設定"]');
+	return !!b && getComputedStyle(b).animationName === 'ir-clickflash';
+}));
+await A.click('.ir-mclose');
+await A.waitForTimeout(250);
+// ---- v2.11 §38: xorig 部屋のクロスオリジン参加（seed から origin 除去の実効性）----
+const XR = 'xroom' + (Date.now() % 100000);
+const X1 = await mk('X');
+await X1.goto(BASE + '/img_room.html');
+await X1.click('button:has-text("部屋作成")');
+await X1.fill('input[name="ir-cn"]', XR);
+await X1.fill('input[name="ir-cuid"]', 'XO1');
+const XPW = await X1.inputValue('input[name="ir-cpw"]');
+await X1.check('.ir-frm .ir-toggle input[type="checkbox"]'); // クロスオリジン許可 ON（作成時固定）
+await X1.click('.ir-frm button:has-text("部屋作成")');
+await X1.waitForSelector('input[type=file]', { timeout: 20000 });
+const xLogs = [];
+X1.on('console', mm => xLogs.push(mm.text() || ''));
+await X1.click('button[aria-label="部屋設定"]');
+await X1.waitForSelector('.ir-mbx h3', { timeout: 10000 });
+await X1.fill('.ir-mbx input[placeholder*="許可オリジン"]', 'http://localhost:8080');
+await X1.click('.ir-mbx .ir-row button:has-text("+")');
+await X1.waitForTimeout(700); // C 配信
+await X1.click('.ir-mclose');
+await X1.waitForTimeout(300);
+const X2 = await mk('X2');
+await X2.goto(LOCBASE + '/img_room.html'); // 別オリジン（localhost）。パスワード・部屋名は正しい
+await X2.click('button:has-text("参加")');
+await X2.fill('input[name="ir-nm"]', XR);
+await X2.fill('input[name="ir-uid"]', 'XO2');
+await X2.fill('input[name="ir-pw"]', XPW);
+await X2.click('.ir-frm button:has-text("ログイン")');
+await X2.waitForSelector('input[type=file]', { timeout: 30000 });
+ck('xorigJoin', true);
+const X3 = await mk('X3');
+await X3.goto(BASE + '/img_room.html'); // 未登録オリジン（127.0.0.1）。pw は正しい → ゲート 2 で棄却
+await X3.click('button:has-text("参加")');
+await X3.fill('input[name="ir-nm"]', XR);
+await X3.fill('input[name="ir-uid"]', 'XO3');
+await X3.fill('input[name="ir-pw"]', XPW);
+await X3.click('.ir-frm button:has-text("ログイン")');
+await X3.waitForFunction(() => document.body.textContent.includes('診断情報:'), null, { timeout: 30000 });
+ck('xorigDenyUnlisted', xLogs.some(x => x.includes('gate=origin') && x.includes('XO3')));
+await X3.close();
+await X2.close();
+await X1.close();
 
 console.log(JSON.stringify({ engine: name, room: ROOM, checks, errors }, null, 1));
 const bad = errors.length || Object.values(checks).some(v => !v);
