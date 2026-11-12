@@ -887,6 +887,50 @@ ck('xorigDenyUnlisted', xLogs.some(x => x.includes('gate=origin') && x.includes(
 await X3.close();
 await X2.close();
 await X1.close();
+// ---- v2.12 §39: メニューの「パスワードのみコピー」は QR 直下/未発行時無効、説明文、file 選択 button pointer ----
+await A.click('button[aria-label="部屋設定"]');
+await A.waitForSelector('.ir-mbx .ir-qrpic', { timeout: 10000 });
+ck('pwCopyPos', await A.evaluate(() => {
+	const mb = document.querySelector('.ir-mbx'),
+		qr = mb.querySelector('.ir-qrrow'),
+		cp = [...mb.querySelectorAll('button')].find(b => (b.textContent || '').includes('パスワードのみコピー'));
+	return !!qr && !!cp && !cp.disabled && (qr.compareDocumentPosition(cp) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}));
+ck('scanNote', await A.evaluate(() => [...document.querySelectorAll('.ir-mbx .ir-qrnote, .ir-mbx .ir-mut')].some(e => (e.textContent || '').includes('部屋名とパスワード'))));
+await A.click('.ir-mclose');
+await A.waitForTimeout(300);
+const D9 = await mk('D9');
+await D9.goto(BASE + '/img_room.html');
+await D9.click('button:has-text("部屋作成")');
+const DR = 'dkw' + (Date.now() % 100000);
+await D9.fill('input[name="ir-cn"]', DR);
+await D9.fill('input[name="ir-cuid"]', 'DEE');
+const DPW = await D9.inputValue('input[name="ir-cpw"]');
+await D9.click('.ir-frm button:has-text("部屋作成")');
+await D9.waitForSelector('input[type=file]', { timeout: 20000 });
+ck('fileCursor', await D9.evaluate(() => {
+	const f = document.querySelector('input[type=file]');
+	return !!f && getComputedStyle(f).cursor === 'pointer';
+}));
+await D9.click('button[aria-label="部屋設定"]');
+await D9.waitForSelector('.ir-mbx h3', { timeout: 10000 });
+await D9.click('.ir-mbx button:has-text("退室")'); // 退室後、再度ログイン（平文 pw 非保持）→ 発行前はボタン無効
+await D9.waitForFunction(() => [...document.querySelectorAll('.ir-btn')].some(b => (b.textContent || '') === 'ログイン'), null, { timeout: 15000 }); // ホームの部屋一覧から再ログイン
+await D9.locator('.ir-btn:has-text("ログイン")').first().click();
+await D9.waitForSelector('.ir-frm input[name="ir-pw"]', { timeout: 10000 });
+await D9.fill('input[name="ir-nm"]', DR);
+await D9.fill('input[name="ir-uid"]', 'DEE');
+await D9.fill('input[name="ir-pw"]', DPW);
+await D9.click('.ir-frm button:has-text("ログイン")');
+await D9.waitForSelector('input[type=file]', { timeout: 30000 });
+await D9.click('button[aria-label="部屋設定"]');
+await D9.waitForSelector('.ir-mbx h3', { timeout: 10000 });
+ck('pwCopyDisabled', await D9.evaluate(() => {
+	const mb = document.querySelector('.ir-mbx'),
+		cp = [...mb.querySelectorAll('button')].find(b => (b.textContent || '').includes('パスワードのみコピー'));
+	return !!cp && cp.disabled === true;
+}));
+await D9.close();
 
 console.log(JSON.stringify({ engine: name, room: ROOM, checks, errors }, null, 1));
 const bad = errors.length || Object.values(checks).some(v => !v);

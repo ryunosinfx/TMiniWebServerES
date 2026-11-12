@@ -686,3 +686,25 @@ select:active:not(:disabled),
 button:focus:not(:focus-visible):not(:disabled) {
 	animation: ir-clickflash .4s ease-out;
 }
+
+/* v2.12 §39: ファイル選択ボタンも pointer に（PC ブラウザの既定矢印の対策） */
+input[type="file"] {
+	cursor: pointer;
+}
+input[type="file"]::file-selector-button {
+	cursor: pointer;
+	background: var(--ir-btn);
+	color: var(--ir-fg);
+	border: 1px solid var(--ir-line);
+	border-radius: 6px;
+	padding: 6px 10px;
+	margin-right: 8px;
+	transition: filter .12s ease, transform .09s ease;
+}
+input[type="file"]::file-selector-button:hover {
+	filter: brightness(.9);
+}
+input[type="file"]:active::file-selector-button {
+	transform: scale(.96);
+	filter: brightness(.8);
+}

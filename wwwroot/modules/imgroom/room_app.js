@@ -1612,11 +1612,14 @@ export class RoomApp {
 			Vw.add(host, 'div', { class: 'ir-mut' }).textContent = t('msg.qr.verify.fail');
 		}
 	}
-	// v2.7 §33: 「パスワードのみコピー」行。QR パック（TMIWR1:…）ではなく本体だけを書き出す
+	// v2.7 §33: 「パスワードのみコピー」行。QR パック（TMIWR1:…）ではなく本体だけを書き出す。
+	// v2.12 §39: 平文 pw 非保持（未発行）ときはボタンを無効化。メニューでは QR の直下（mkQr の再生成に従属）に配置
 	pwCopyRow(host, ctx) {
 		const row = Vw.div(host, { class: 'ir-row' });
 		const bp = Vw.btn(row, { class: 'ir-btn' });
 		Vw.sT(bp, t('btn.copy.pw'));
+		const has = !!ctx.plainPw;
+		bp.disabled = !has;
 		Vw.click(bp, () => {
 			if (!ctx.plainPw) {
 				Toast(t('msg.qr.needpw'));
@@ -1669,11 +1672,12 @@ export class RoomApp {
 			if (!ctx.plainPw) {
 				Vw.rc(qrBox);
 				Vw.add(qrBox, 'div', { class: 'ir-mut' }).textContent = t('msg.qr.needpw');
+				this.pwCopyRow(qrBox, ctx); // v2.12 §39: 未発行でもボタンは QR 直下に無効表示
 				return;
 			}
 			this.qrInto(qrBox, qrPack(ctx.nb, ctx.plainPw), { file: ctx.rid + '.png', secret: true, note: t('lbl.qr.secret') });
+			this.pwCopyRow(qrBox, ctx); // v2.12 §39: QR の直下（発行で再生成され有効化）
 		};
-		this.pwCopyRow(box, ctx); // v2.7 §33: メニュー QR 欄にもパスワード本体コピー（QR 再生成と無関係に固定）
 		// パスワード再発行（新 seed 算出 → C 送出、§6.3/§8.3）
 		const r1 = Vw.div(box, { class: 'ir-row' });
 		const iss = Vw.btn(r1, { class: 'ir-btn' });
