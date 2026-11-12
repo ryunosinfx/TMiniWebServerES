@@ -654,3 +654,35 @@ body {
 	max-width: 90vw;
 	z-index: 9999;
 }
+
+/* ==== v2.10 §37: クリック可能要素はすべてカーソル pointer + クリックの視覚フィードバック（純 CSS） ==== */
+button:not(:disabled),
+select:not(:disabled),
+input[type="radio"]:not(:disabled),
+input[type="checkbox"]:not(:disabled) {
+	cursor: pointer;
+}
+button:disabled,
+select:disabled,
+input[type="radio"]:disabled,
+input[type="checkbox"]:disabled {
+	cursor: default;
+	opacity: .55;
+}
+button, .ir-btn, .ir-thumb, .ir-mclose, .ir-rw, .ir-fsp button, .ir-ctrlbar button {
+	transition: transform .09s ease, filter .12s ease, box-shadow .2s ease, background-color .12s ease;
+}
+button:active:not(:disabled),
+select:active:not(:disabled),
+.ir-thumb:active {
+	transform: scale(.955);
+	filter: brightness(.8);
+}
+/* クリックした瞬間だけ波紋が広がる。:focus-visible を除外するので Tab 操作では発火しない */
+@keyframes ir-clickflash {
+	0% { box-shadow: 0 0 0 0 rgba(110, 168, 254, .55); }
+	100% { box-shadow: 0 0 0 14px rgba(110, 168, 254, 0); }
+}
+button:focus:not(:focus-visible):not(:disabled) {
+	animation: ir-clickflash .4s ease-out;
+}
