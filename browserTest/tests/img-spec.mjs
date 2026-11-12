@@ -438,11 +438,25 @@ ck('fsKeepOn', (await A.locator('.ir-mbx.ir-fs').count()) === 1 && (await A.loca
 // v2.5 §30: 全画面中の ←/→ は戻る/次へ。解除確認ボタンは同サイズ・10px 間隔
 const h0k = await A.evaluate(() => window.__IRAPP._vBox._h10); // ファイル名重複に依存しない
 await A.keyboard.press('ArrowRight');
-await A.waitForFunction(h => {
+let movedK = true;
+try {
+	await A.waitForFunction(h => {
+		const b = window.__IRAPP._vBox;
+		return b && b._h10 !== h;
+	}, h0k, { timeout: 8000 });
+} catch (e) {
+	movedK = false;
+	console.log('fsKeyDiag', JSON.stringify(await A.evaluate(h => {
+		const c = window.__IRAPP,
+			b = c._vBox;
+		return { h0: h, h10: b && b._vBox ? b._vBox._h10 : b && b._h10, seq: (c._slSeq || []).slice(0, 8), idx: b ? (c._slSeq || []).indexOf(b._h10) : null, fs: b && b.classList.contains('ir-fs'), fsc: !!(b && b._fsc), slOn: c._slOn, metas: c.activeCtx().collection.metas.size, pend: [c._fsPend, c._slPend] };
+	}, h0k)));
+}
+ck('fsKeyNext', movedK && (await A.locator('.ir-mbx.ir-fs').count()) === 1);
+await A.waitForFunction(() => {
 	const b = window.__IRAPP._vBox;
-	return b && b._h10 !== h;
-}, h0k, { timeout: 8000 });
-ck('fsKeyNext', (await A.locator('.ir-mbx.ir-fs').count()) === 1);
+	return b && b._fsWire === true && window.__IRAPP._fsPend === false;
+}, null, { timeout: 8000 }); // 再配線完了まで待ってから左キー（取りこぼし防止）
 await A.keyboard.press('ArrowLeft');
 await A.waitForFunction(h => {
 	const b = window.__IRAPP._vBox;
@@ -477,6 +491,10 @@ await A.waitForFunction(cur => {
 }, t0s, { timeout: 9000 });
 const t1s = (await A.textContent('.ir-mbx h3')).trim();
 ck('slideAdvance', t1s !== t0s);
+await A.waitForFunction(() => {
+	const b = window.__IRAPP._vBox;
+	return b && b._fsWire === true && window.__IRAPP._fsPend === false;
+}, null, { timeout: 8000 }); // 送り後の再配線待ち
 await A.keyboard.press('ArrowLeft'); // v2.5 §30: スライドショー中の ← は戻る
 await A.waitForFunction(n => {
 	const x = document.querySelector('.ir-mbx h3');
@@ -769,6 +787,40 @@ await E.click('.ir-frm button:has-text("ログイン")');
 await E.waitForSelector('input[type=file]', { timeout: 30000 });
 ck('joinWithPack', true);
 await E.close();
+// ---- v2.8 §34: 参加フォーム/リトライボックスの診断表示（誤パスワード採決不 OK 経路）----
+const aLogs = [];
+A.on('console', mm => aLogs.push(mm.text() || '')); // v2.9 §35: 投票側監査ログ（console.info）収集
+const F2 = await mk('F');
+await F2.goto(BASE + '/img_room.html');
+await F2.click('button:has-text("参加")');
+ck('joinFormOriginLine', await F2.evaluate(() => [...document.querySelectorAll('.ir-frm .ir-mut')].some(e => (e.textContent || '').includes('このページのオリジン: http://'))));
+await F2.fill('input[name="ir-nm"]', ROOM);
+await F2.fill('input[name="ir-uid"]', 'FAKE');
+await F2.fill('input[name="ir-pw"]', 'WRONGPW');
+await F2.click('.ir-frm button:has-text("ログイン")');
+await F2.waitForFunction(() => document.body.textContent.includes('診断情報:'), null, { timeout: 30000 });
+ck('retryDiag', await F2.evaluate(() => {
+	const t = document.body.textContent || '';
+	return t.includes('このページのオリジン: http://') && t.includes('モード: normal') && t.includes('クロスオリジン');
+}));
+await F2.close();
+// ---- v2.9 §35: 投票側ゲート監査（誤 pw=gate=pw / 別オリジン参加=gate=origin）----
+ck('voteDenyPw', aLogs.some(x => x.includes('gate=pw')));
+const LOCBASE = BASE.replace('//127.0.0.1', '//localhost');
+const G = await mk('G');
+await G.goto(LOCBASE + '/img_room.html');
+await G.click('button:has-text("参加")');
+await G.fill('input[name="ir-nm"]', ROOM);
+await G.fill('input[name="ir-uid"]', 'GLAB');
+await G.fill('input[name="ir-pw"]', ppw); // パスワードは正しい。オリジン（localhost）だけが違う
+await G.click('.ir-frm button:has-text("ログイン")');
+await G.waitForFunction(() => document.body.textContent.includes('診断情報:'), null, { timeout: 30000 });
+ck('voteDenyOrigin', aLogs.some(x => x.includes('gate=origin') && x.includes('GLAB')));
+ck('voteLogArr', await A.evaluate(() => {
+	const vl = window.__IRAPP.activeCtx().session._voteLog || [];
+	return vl.some(e => e.gate === 'origin' && e.uid === 'GLAB');
+}));
+await G.close();
 
 console.log(JSON.stringify({ engine: name, room: ROOM, checks, errors }, null, 1));
 const bad = errors.length || Object.values(checks).some(v => !v);

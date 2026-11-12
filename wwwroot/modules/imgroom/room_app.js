@@ -356,6 +356,7 @@ export class RoomApp {
 		const rl = rid && AppSettings.state && (AppSettings.state.roomLogin || {})[rid];
 		if (rl) uidIn.value = rl.uid || '';
 		const pwIn = Vw.ipt(f, { type: 'password', name: 'ir-pw', placeholder: t('lbl.password') });
+		Vw.add(f, 'div', { class: 'ir-mut' }).textContent = t('diag.origin') + ': ' + location.origin; // v2.8 §34: 参加側のオリジン表示（作成者に oa 登録してもらうため）
 		// モード選択（サーバーはログイン時のみ、srvOn=false 部屋では disabled、§5.1/§5.7/§6.8）
 		Vw.add(f, 'label').textContent = t('lbl.mode');
 		const mr = Vw.div(f, { class: 'ir-row' });
@@ -446,6 +447,10 @@ export class RoomApp {
 		const m = this.main;
 		Vw.rc(m);
 		Vw.add(m, 'div', { class: 'ir-sec' }).textContent = t('msg.auth.fail');
+		// v2.8 §34: 自機情報のみを表示する診断欄（採決不 OK の切り分け用。秘密は出さない）
+		const lt = ctx.lastTry || {};
+		Vw.add(m, 'div', { class: 'ir-mut' }).textContent = t('diag.title') + ' ' + t('diag.origin') + ': ' + location.origin + ' / ' + t('diag.mode') + ': ' + (lt.mode || '-');
+		Vw.add(m, 'div', { class: 'ir-mut' }).textContent = t('diag.hint');
 		const b = Vw.btn(m, { class: 'ir-btn' });
 		Vw.sT(b, t('btn.retry'));
 		Vw.click(b, () => this.tryLogin(ctx.lastTry));
@@ -1370,17 +1375,20 @@ export class RoomApp {
 		if (!box || !box._h10 || !box._mdl || !box._mdl.isConnected) return;
 		const seq = this._slSeq || [];
 		if (seq.length < 2) return;
-		const i = (seq.indexOf(box._h10) + dir + seq.length) % seq.length,
-			nxt = seq[i];
-		if (nxt === box._h10) return;
-		const b = await this.bodyOf(nxt).catch(() => null);
-		if (!b) {
-			if (this._slOn) this.slStop();
-			return;
+		const start = seq.indexOf(box._h10);
+		// v2.8 §34: 隣接項目が実体欠損でも同じ方向の次候補へスキップ（キー送りは送り停止しない。§22 の停止方針はタイマ送りの slNext のみ）
+		for (let sc = 1; sc <= seq.length; sc++) {
+			const i = ((start + dir * sc) % seq.length + seq.length) % seq.length,
+				nxt = seq[i];
+			if (nxt === box._h10) continue;
+			const b = await this.bodyOf(nxt).catch(() => null);
+			if (b) {
+				this._fsPend = true;
+				this._slPend = this._slOn === true;
+				this.viewer(nxt, b);
+				return;
+			}
 		}
-		this._fsPend = true;
-		this._slPend = this._slOn === true;
-		this.viewer(nxt, b);
 	}
 	async viewer(h10, blob) {
 		// 同一画像の再クリック無視・別画像表示時は旧ビューアを閉じる（モーダル多重防止、追加仕様 v1.2）
@@ -1392,6 +1400,20 @@ export class RoomApp {
 		const nm = meta ? RoomApp.unB64(meta.n) || meta.n || '' : '';
 		const box = this.dlg(nm || t('lbl.meta.n')); // ハッシュ表示ではなくファイル名をタイトルに（追加仕様）
 		this._vBox = box;
+		// v2.8 §34: 送りキーの取りこぼし防止。リスナは即時登録し、全画面配線(askExit/enterFs/seq)完了までは無視する
+		const onFKey = e => {
+			if (!box.isConnected) {
+				Vw.rel(document, 'keydown', onFKey);
+				return;
+			}
+			if (!box._fsWire || !box.classList.contains('ir-fs') || box._fsc) return;
+			if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+				e.preventDefault();
+				if (this._slOn && !this._slPaused) this.slArm();
+				this.slStep(e.key === 'ArrowRight' ? 1 : -1).catch(er => ef(er, 'room_app.fsStep'));
+			}
+		};
+		Vw.ael(document, 'keydown', onFKey);
 		box._onClose = () => {
 			this._vBox = null;
 			this._vPend = null;
@@ -1500,26 +1522,14 @@ export class RoomApp {
 		Vw.click(wrap, () => {
 			if (box.classList.contains('ir-fs')) askExit(); // 全画面中の画像タップは解除確認
 		});
-		// v2.5 §30: 全画面/スライドショー中の ←/→ は戻る/次へ（確認中は無視。手動送りではタイマ再アーム）
-		const onFKey = e => {
-			if (!box.isConnected) {
-				Vw.rel(document, 'keydown', onFKey);
-				return;
-			}
-			if (!box.classList.contains('ir-fs') || box._fsc) return;
-			if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-				e.preventDefault();
-				if (this._slOn && !this._slPaused) this.slArm();
-				this.slStep(e.key === 'ArrowRight' ? 1 : -1).catch(er => ef(er, 'room_app.fsStep'));
-			}
-		};
-		Vw.ael(document, 'keydown', onFKey);
+		// v2.5 §30: ←/→ は冒頭登録の onFKey で処理（v2.8 §34 で即時登録化）
 		if (this._fsPend) {
 			const sl = this._slPend === true;
 			this._fsPend = false;
 			this._slPend = false;
 			enterFs(sl); // slideshow の送器で開き直したセッションを全画面+自動送りで再開
 		}
+		box._fsWire = true; // v2.8 §34: askExit/enterFs/seq 配線完了（以降のキーは処理）
 		// 画像下は 3 行のみ: 投稿者・部屋 / 投稿日・MimeType / SHA256Sum（追加仕様 v1.2）
 		const mb = Vw.add(box, 'div', { class: 'ir-meta3' });
 		if (meta) {

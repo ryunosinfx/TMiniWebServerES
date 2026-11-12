@@ -747,12 +747,23 @@ export class RoomSession {
 	}
 	async _checkW(p) {
 		const m = p.mode;
-		if (!MODES.includes(m)) return F;
+		// v2.9 §35: 投票側のみに残る監査ログ（対外送信なし。salt/オリジン/パスワードの切り分け用）。
+		// 参照: window.__IRAPP.activeCtx().session._voteLog
+		const deny = gate => {
+			this._voteLog = this._voteLog || [];
+			this._voteLog.push({ t: Date.now(), uid: p.uid, anonce: p.anonce, gate, mine: location.origin, mode: m, salt: p.salt });
+			if (this._voteLog.length > 20) this._voteLog.shift();
+			try {
+				console.info('[imgroom vote] deny uid=' + p.uid + ' gate=' + gate + ' myOrigin=' + location.origin + ' xorig=' + (this.room.xorig === T || this.room.xorig === true) + ' oa=' + JSON.stringify(this.room.oa || []));
+			} catch (e) {}
+			return F;
+		};
+		if (!MODES.includes(m)) return deny('mode');
 		// 1. salt 妥当性（§6.2/§6.7）: 通常/同期=現在 UTC 月。server=YYYYMMDD かつ参加当日以前かつ srvOn
 		if (m === 'server') {
-			if (this.room.srvOn !== T && this.room.srvOn !== true) return F; // mode=server & srvOn=false は即不 OK（§6.8）
-			if (!/^\d{8}$/.test(p.salt || '') || +p.salt > +AuthChallenge.saltServer()) return F;
-		} else if (p.salt !== AuthChallenge.saltNormal()) return F;
+			if (this.room.srvOn !== T && this.room.srvOn !== true) return deny('salt.srvOn'); // mode=server & srvOn=false は即不 OK（§6.8）
+			if (!/^\d{8}$/.test(p.salt || '') || +p.salt > +AuthChallenge.saltServer()) return deny('salt.fmt');
+		} else if (p.salt !== AuthChallenge.saltNormal()) return deny('salt.month');
 		// 2. オリジン整合（§6.2/§6.6）: oa 内の同一オリジン o について ho==H(o) かつ hor==H(reverse(o))
 		const oas = this._effOa();
 		let matched = F;
@@ -763,11 +774,11 @@ export class RoomSession {
 				break;
 			}
 		}
-		if (!matched) return F;
+		if (!matched) return deny('origin');
 		// 3. パスワード整合: 自分の OPFS 保管 seedSaltedHash で at 再計算照合（§6.2）
-		if (!this._pw) return F;
+		if (!this._pw) return deny('nopw');
 		const at = await AuthChallenge.at({ ho: p.ho, seed: this._pw, hor: p.hor, uid: p.uid, salt: p.salt, anonce: p.anonce }, this._rounds());
-		return at === p.at;
+		return at === p.at ? T : deny('pw');
 	}
 	// 許可オリジン実効値（§6.6）: xorig=true なら oa（b64url 化されたオリジン列）、false なら自己オリジン 1 個に強制上書き
 	_effOa() {
