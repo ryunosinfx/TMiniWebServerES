@@ -71,6 +71,10 @@ export class RoomCalendar {
 			Vw.click(b, () => this.setMode(m));
 			this._modeBtns.set(m, b);
 		}
+		// v2.18 §45: カレンダーピックアップ（画像のある任意の日へ、見出し行を最上段に）
+		this.pickBtn = Vw.btn(this.bar, { class: 'ir-cpick', type: 'button' }); // modeTabsBottom の ir-calmode 個数検査を壊さないよう別クラス
+		Vw.sT(this.pickBtn, '\ud83d\udcc5 ' + I18N.t('btn.cal.pick'));
+		Vw.click(this.pickBtn, () => this.pickPanel());
 		this.calBox = Vw.div(this.root, { class: 'ir-calbox' });
 		this.mkCal();
 		// 言語切替（I18N.onChange は RoomApp 等の所有者。グローバル上書きせず
@@ -109,6 +113,47 @@ export class RoomCalendar {
 			out.push({ ...it, ts });
 		}
 		return out;
+	}
+
+	pickPanel() {
+		// 画像のある日の一覧パネル（トグル）。日を選択 → 現在の表示モードの該当セクションを見出し最上段へ
+		if (this.dead) return;
+		if (this._pk) {
+			Vw.rm(this._pk);
+			this._pk = null;
+			return;
+		}
+		const p = Vw.add(this.bar, 'div', { class: 'ir-pick' }),
+			days = this.cal ? this.cal.daysWith() : [];
+		Vw.add(p, 'div', { class: 'ir-mut' }).textContent = I18N.t('lbl.cal.pick');
+		if (!days.length) Vw.add(p, 'div', { class: 'ir-mut' }).textContent = I18N.t('msg.cal.pick.none');
+		const list = Vw.div(p, { class: 'ir-picklist' });
+		const dt = k => {
+			const d = new Date(k),
+				n = x => (x < 10 ? `0${x}` : `${x}`);
+			return `${d.getFullYear()}/${n(d.getMonth() + 1)}/${n(d.getDate())}`;
+		};
+		for (const { k, c } of days) {
+			const b = Vw.btn(list, { class: 'ir-pickday', type: 'button' });
+			Vw.sT(b, `${dt(k)} (${c})`);
+			b.dataset.k = String(k); // 候補の日键（テスト/診断用）
+			Vw.click(b, () => {
+				Vw.rm(p);
+				this._pk = null;
+				if (this.cal) {
+					this.cal.jumpToDay(k);
+					this.schedulePass();
+				}
+			});
+		}
+		this._pk = p;
+		Vw.ael(document, 'pointerdown', e => { // 外側タップで閉じる（次回描画分は 1 回限り）
+			if (this.dead || !this._pk) return;
+			if (!this._pk.contains(e.target) && e.target !== this.pickBtn) {
+				Vw.rm(this._pk);
+				this._pk = null;
+			}
+		}, { once: true });
 	}
 
 	setItems(items) {

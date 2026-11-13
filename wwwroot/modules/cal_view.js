@@ -68,6 +68,71 @@ export class CalView {
 		this.it = Array.isArray(items) ? items : [];
 		this.reb();
 	}
+	daysWith() {
+		// 画像がある日の一覧（現在→過去。[{k: 0 時 ms, c: 件数}]、v2.18 §45 ピッカー用）
+		return (this.bk || []).map(b => ({ k: b.k, c: (b.v || []).length }));
+	}
+	secIdxOfDay(k) {
+		// 指定日（0 時 ms）を含むセクション番号（現在→過去順。無ければ -1）。DST ±1h は日数丸めで吸収
+		const secs = this.sec || [];
+		for (let i = 0; i < secs.length; i++) {
+			const sd = d0(new Date(secs[i].d && secs[i].d.getTime ? secs[i].d.getTime() : secs[i].d)).getTime();
+			let span;
+			if (this.md === 'day') span = 1;
+			else if (this.md === 'week') span = 7;
+			else {
+				const dt = new Date(sd);
+				span = Math.round((new Date(dt.getFullYear(), dt.getMonth() + 1, 1).getTime() - sd) / DY);
+			}
+			if (Math.round((k - sd) / DY) >= 0 && Math.round((k - sd) / DY) < span) return i;
+		}
+		return -1;
+	}
+	jumpToDay(k) {
+		// 該当日のセクション見出しを表示領域最上段へ（v2.18 §45）。
+		// 見出し（.cal-ch）は sticky top:0（§22）なので、セクション位置へスクロールすれば最上段に固定表示される。
+		// ページ全体スクロール様式（v1.5 §19）で文書にスクロール余地が足りない場合は body 末尾に透明パッドを作る
+		// （box 内スペーサ伸長は flex 制約で文書高さに反映されないため、body 直下に行う）
+		if (this.dead || !this.box || !this.vl) return false;
+		const i = this.secIdxOfDay(k);
+		if (i < 0) return false;
+		const pg = this.vl.pg || this.pgPx(),
+			need = i * pg,
+			viewH = this.box.clientHeight || 480;
+		if (this.box.scrollHeight > this.box.clientHeight + 1) {
+			// 容器スクロール様式: そのまま最上段へ
+			this.box.scrollTop = need;
+		} else {
+			const vh = (document.documentElement && document.documentElement.clientHeight) || 720,
+				bt = window.scrollY + this.box.getBoundingClientRect().top, // ボックス上端のドキュメント y
+				targetY = bt + need; // この scrollY でセクション top が viewport 上端（sticky 見出し最上段）
+			// 収束ループ: パッド配置→スクロール→不足なら必要文書高さまで延長（配置様式で伸長率がズレるため実測収束）
+			for (let n = 0; n < 4; n++) {
+				window.scrollTo(0, targetY);
+				if (this.box.getBoundingClientRect().top <= -need + 2) break;
+				this._tailDoc(targetY + vh);
+			}
+		}
+		this.vl.upd();
+		if (this.oS) this.oS();
+		return true;
+	}
+	_tailDoc(docMin) {
+		// ICB 基準の透明スクロールパッド（body flex/overflow 配下でも文書伸長に効く）。必要文書高さまで拡大のみ
+		if (!this._tailEl) {
+			this._tailEl = document.createElement('div');
+			this._tailEl.setAttribute('aria-hidden', 'true');
+			this._tailEl.style.cssText = 'position:absolute;left:0;width:1px;pointer-events:none;';
+			(document.body || document.documentElement).appendChild(this._tailEl);
+		}
+		const top = this.box.getBoundingClientRect().top + window.scrollY + this.box.offsetHeight + 16,
+			want = Math.max(0, docMin - top),
+			cur = parseFloat(this._tailEl.style.height || '0');
+		if (want > cur) {
+			this._tailEl.style.top = `${top.toFixed(0)}px`;
+			this._tailEl.style.height = `${want.toFixed(0)}px`;
+		}
+	}
 	refresh() {
 		// 再計算（count 変化・レイアウト変化時。窓評価のみ）
 		if (this.dead) return;
@@ -81,6 +146,8 @@ export class CalView {
 		this.vl = null;
 		Vw.rm(this.box);
 		this.box = null;
+		if (this._tailEl) Vw.rm(this._tailEl); // v2.18 §45: スクロールパッド後始末（Vw.rm は null 非耐性）
+		this._tailEl = null;
 		this.bk = [];
 		this.sec = [];
 		this.it = [];

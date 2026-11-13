@@ -269,6 +269,8 @@ new RoomApp() .boot() // window.onload から呼ぶ
 //   参加処理より先に適用。別ドメインの既存 WSBASE は confirm で確認。roomUrl(ctx) は逆方向（URL QR/リンク）に同形式を生成。
 //   参加/作成フォームは <form class="ir-frm"> + autocomplete(username/current-password/new-password)、submit→primary click 委譲。
 //   urlQrBlock に PWQR.<rid> checkbox（サーバーモードの pw QR 併記オプション、app_state 永続・メモリ即反映）。
+//   v2.18 §45: CalView.daysWith()/jumpToDay(k)（セクション最上段+sticky 見出し。ページ様式は body 直下 ICB パッドで余地確保、
+//   RoomCalendar は .ir-cpick ボタンと .ir-pick パネル）。Vw.rm は null 非耐性。
 //   v2.16 §43: viewer は .ir-navz 帯（左右 1/3）で全項目 ts 降順の前後切替（未保有は fetchBody、周回）、
 //   単クリック 300ms 遅延／連続クリックと中央 2 クリック（320ms 以内）で enterFs。←/→ は全画面でなくても navStep。
 ```

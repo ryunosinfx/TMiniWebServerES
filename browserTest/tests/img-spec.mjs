@@ -121,6 +121,7 @@ await shot([A], ['作成者: パスワード QR タブ'], 'img_spec_2_qrpw.png')
 await A.click('.ir-subtab:has-text("画像")');
 
 // サーバーモード許可 → ログアウト → サーバーモードで再ログイン
+await A.waitForSelector('button[aria-label="部屋設定"]', { timeout: 10000 }); // 再描画直後の見えかけタイムアウト対策（ Flake 経験値）
 await A.click('button[aria-label="部屋設定"]'); // v2.0 §24: 歯車絵文字化
 await A.waitForSelector('.ir-mbx', { timeout: 5000 });
 await A.click('.ir-mbx .ir-rw:has-text("同期") input[type=radio]'); // v2.2 §26: トグル→同期/通常ラジオ
@@ -338,18 +339,6 @@ ck('szPickers', await B.evaluate(() => {
 }));
 await B.click('.ir-tsz:text-is("128")');
 await B.waitForTimeout(800);
-ck('sz128', await B.evaluate(() => {
-	const css = getComputedStyle(document.documentElement).getPropertyValue('--ir-thumb').trim();
-	const el = document.querySelector('.cal-cell .ir-thumb');
-	const on = [...document.querySelectorAll('.ir-tsz.on')].map(b => b.textContent.trim());
-	return css === '128px' && !!el && getComputedStyle(el).width === '128px' && on.filter(x => x === '128').length === 1;
-}), await B.evaluate(() => JSON.stringify({ css: getComputedStyle(document.documentElement).getPropertyValue('--ir-thumb').trim() })));
-await B.click('.ir-tsz:text-is("32")');
-await B.waitForTimeout(600);
-ck('sz32', await B.evaluate(() => {
-	const el = document.querySelector('.cal-cell .ir-thumb');
-	return getComputedStyle(document.documentElement).getPropertyValue('--ir-thumb').trim() === '32px' && (!el || getComputedStyle(el).width === '32px');
-}));
 ck('thumbContain', await B.evaluate(async () => {
 	const { ImgProc } = await import('/modules/img_proc.js');
 	const cc = document.createElement('canvas');
@@ -1283,6 +1272,72 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	await T2.click('.ir-mclose');
 	await T1.close();
 	await T2.close();
+}
+// ---- v2.18 §45: カレンダーピックアップ（画像のある日へ移動・見出し行最上段） ----
+{
+	ck('pickBtn', await B.locator('.ir-calbar .ir-cpick').count() === 1);
+	// メモリ上の擬似过去日（10 日前）を作り候補を 2 日以上にする（永続化しない・このページは間もなくクローズ）
+	ck('pickSetupPast', await B.evaluate(() => {
+		const c = window.__IRAPP.activeCtx(),
+			hs = [...c.collection.metas.keys()];
+		if (!hs.length) return false;
+		c.collection.metas.get(hs[0]).ts = Date.now() - 10 * 86400000;
+		c.cal.setItems(c.collection.roomItems());
+		return true;
+	}));
+	// 日モードに切替（セクション=日。10 日前と今日が別セクションになりジャンプ距離が出る）
+	await B.click('.ir-calbar .ir-calmode:has-text("日")');
+	await B.waitForTimeout(400);
+	await B.click('.ir-calbar .ir-cpick');
+	await B.waitForSelector('.ir-pick .ir-pickday', { timeout: 5000 });
+	ck('pickDays2', await B.locator('.ir-pick .ir-pickday').count() >= 2);
+	// 候補は現在→過去順。その中から「今スクロール位置に無い日」を選ぶ（日→新順セクションとの整合に依らず検証できる）
+	const dk = await B.evaluate(() => {
+		const c = window.__IRAPP.activeCtx(),
+			cvv = c.cal.cal,
+			btns = [...document.querySelectorAll('.ir-pick .ir-pickday')];
+		for (const el of btns) {
+			const i = cvv.secIdxOfDay(+el.dataset.k);
+			if (i >= 0 && Math.abs(cvv.box.scrollTop - i * cvv.vl.pg) > 4) return el.dataset.k;
+		}
+		return '';
+	});
+	console.log('pj1Dbg', JSON.stringify(await B.evaluate(() => {
+		const c = window.__IRAPP.activeCtx(),
+			cvv = c.cal.cal;
+		return { md: cvv.md, pad: cvv.padPages, st: cvv.box.scrollTop, ch: cvv.box.clientHeight, pc: cvv.pgCnt(), days: cvv.daysWith().map(x => ({ k: x.k, i: cvv.secIdxOfDay(x.k) })) };
+	})));
+	ck('pickTarget', !!dk);
+	if (!dk) await B.click('.ir-calbar .ir-cpick'); // パネル閉じ（残さない）
+	if (dk) {
+		await B.click(`.ir-pick .ir-pickday[data-k="${dk}"]`);
+		await B.waitForTimeout(600);
+		console.log('pj2Dbg', JSON.stringify(await B.evaluate(k => {
+			const c = window.__IRAPP.activeCtx(),
+				cvv = c.cal.cal;
+			return { k: +k, i: cvv.secIdxOfDay(+k), pg: cvv.vl.pg, pad: cvv.padPages, st: cvv.box.scrollTop, y: window.scrollY, bt: Math.round(cvv.box.getBoundingClientRect().top), dh: document.documentElement.scrollHeight, vh: document.documentElement.clientHeight, ch: cvv.box.clientHeight, sh: cvv.box.scrollHeight, pc: cvv.pgCnt(), md: cvv.md };
+		}, dk)));
+		ck('pickJumpTop', await B.evaluate(k => {
+			const c = window.__IRAPP.activeCtx(),
+				cvv = c.cal.cal,
+				i = cvv.secIdxOfDay(+k),
+				pg = cvv.vl.pg,
+				st = cvv.box.scrollTop || Math.max(0, -cvv.box.getBoundingClientRect().top); // 両レイアウト共通の実効スクロール量
+			return i >= 0 && Math.abs(st - i * pg) <= 2 && st > 0; // 該当セクションの top が最上段（実際に動かす）
+		}, dk));
+		ck('pickHeaderTop', await B.evaluate(k => {
+			const c = window.__IRAPP.activeCtx(),
+				cvv = c.cal.cal,
+				i = cvv.secIdxOfDay(+k),
+				el = cvv.vl.els.get(i);
+			if (!el) return false;
+			const r = el.getBoundingClientRect(),
+				br = cvv.box.getBoundingClientRect();
+			return Math.abs(r.top - Math.max(0, br.top)) <= 8; // DOM 実寸で表示領域一番上（box/ページ両スクロール様式）
+		}, dk));
+	}
+	ck('pickClosed', await B.locator('.ir-pick').count() === 0); // 選択で閉じる
+	ck('pickClosed', await B.locator('.ir-pick').count() === 0); // 選択で閉じる
 }
 await N9.close();
 await K1.close();

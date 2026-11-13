@@ -763,3 +763,41 @@ input[type="file"]:active::file-selector-button {
 		opacity: 0.3;
 	}
 }
+
+/* v2.18 §45: カレンダーピックアップパネル */
+.ir-calbar {
+	position: relative;
+}
+.ir-pick {
+	position: absolute;
+	z-index: 20;
+	bottom: calc(100% + 4px); /* ctrlbar は画面下固定なので上方向に開く */
+	left: 0;
+	width: 230px;
+	max-height: 340px;
+	overflow: auto;
+	background: var(--ir-bg2);
+	border: 1px solid var(--ir-line);
+	border-radius: 8px;
+	padding: 8px;
+	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.ir-picklist {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-top: 4px;
+}
+.ir-pickday {
+	text-align: left;
+}
+
+.ir-cpick {
+	background: var(--ir-bg2);
+	color: var(--ir-fg);
+	border: 1px solid var(--ir-line);
+	border-radius: 6px;
+	padding: 2px 8px;
+	font-size: 0.85em;
+	cursor: pointer;
+}

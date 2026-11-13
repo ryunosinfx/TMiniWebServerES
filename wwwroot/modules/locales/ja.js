@@ -35,7 +35,10 @@ export default {
 	'msg.offline': 'オフラインモードです', // §9.7 WS 切断
 	'msg.fetch.progress': '取得中 {n}/{m}',
 	'msg.fetch.fail': '保持者が見つかりません', // §12 A{st:nf}/Q 応答なし 全滅
-		'lbl.cal.more': '+{n} 件',
+		'btn.cal.pick': '日付へ移動',
+	'lbl.cal.pick': '画像のある日',
+	'msg.cal.pick.none': '画像がありません',
+	'lbl.cal.more': '+{n} 件',
 	'lbl.thumb.size': 'サムネサイズ',
 'msg.share.tooBig': '画像が大きすぎます（上限 {limit} MB）',
 	'msg.share.unsupported': '「{name}」はこのブラウザがサポートする画像形式ではないため、お断りしました',
