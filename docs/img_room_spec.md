@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.14
+- ステータス: ドラフト v2.15
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1354,3 +1354,18 @@ ponta 側を**強制再読込**したうえで再試行するとコンソール�
 
 ### テスト（「SPEC OK」）
 - `hdrModeSelect`（ヘッダーに select 1 個。旧 radio 検証を置換）/ `hdrSwitchSelect`（選択肢 normal,keep,sync）/ `hdrSwitchState`（mode+cal.keep 即時反映）/ `hdrSwitchAdopt`（切替後に既保存本文でも mset 採用+store 実在）/ `hdrSwitchPersist`（roomLogin.mode='keep'）。
+
+## 42. 追加仕様 v2.15: URL/QR での WebSocket 接続先運搬・サーバーモードのパスワード QR 併記・パスワードマネージャ対応フォーム
+要求（2026-11-13）: ①URL のアンカーに b64url エンコードした WebSocket URL を追加し、その URL を開いたら WS 設定をそこにすること。ただし**別ドメインの既存設定**がある場合は上書きしてよいかユーザーへ確認し、OK の時だけ上書き。②URL QR は今後「URL+WS URL(b64url) アンカー」を表示。③説明に WS URL を含む旨を記述。④サーバーモードでは（URL QR を）常に表示（既存踏襲）。⑤サーバーモードではオプションで**パスワード QR も同時表示**できるようにする。⑥ログイン画面を form 等で囲みブラウザのパスワードマネージャがユーザー名/パスワードを検知できるようにする。
+
+- **URL 形式（拡張）**: `…/img_room.html#<部屋名 b64url>:<b64url(WebSocket base)>`。従来形 `#<部屋名>` と後方互換（コロン無ければ WS 部なし）。WS 部は **wsNorm 後の実効 base**（既定時もこのサイト由来の `ws(s)://host[:port]` に正規化して同梱）。パスは `location.href` から hash/query を除いた実 URL（サブディレクトリ配信=GitHub Pages 対応、v2.11 の教訓）。
+- **開いた時（boot・`RoomApp.hashWs()`）**: 解析→`wsNorm`→既存設定（`user_settings.WSBASE`）と比較。**設定なし/同一なら無言で適用**、**別ドメイン等の異なる設定なら `confirm(t('msg.ws.confirm'))` で確認**、OK のみ上書き（`setWsBase` + `AppSettings.set('WSBASE',…)` 永続）。適用は部屋参加（autoJoin/rejoin）より前（同一 boot 内）。
+- **URL QR / リンク**: `roomUrl()` が WS 部を常に生成（§5.1 の共有 URL・作成者サブタブ URL QR・サーバーモード常時ブロックすべて共通）。パスワード QR（TMIWR1 pack）と違い URL QR は平文を含まない。
+- **サーバーモードの pw QR 併記（オプション）**: 常時 URL QR ブロックに checkbox「パスワード QR コードも同時に表示する」追加。ON にすると同ブロック内に TMIWR1 pack QR（`.ir-secret` 枠・警告文）。平文 pw を保持していない端末（再接続後等）では checkbox 無効。設定は `roomLogin` と同ファイル（app_state）に `PWQR.<rid>` で部屋単位記憶。`AppSettings` の 500ms デバウンスにより**メモリキャッシュは即更新**（UI の再読出し整合性）。
+- **説明文**: `lbl.qr.scan.url` に「WebSocket 接続先の設定も自動的に反映（別ドメイン設定時は確認）」を追記。
+- **パスワードマネージャ**: 参加/ログイン・部屋作成の各フォームを `<div>` → **`<form class="ir-frm">`** に変更。`ir-uid/ir-cuid` → `autocomplete="username"`、`ir-pw` → `autocomplete="current-password"`、`ir-cpw` → `autocomplete="new-password"`、部屋名は `autocomplete="off"`。フォーム内ボタンは全て `type="button"` とし、**form submit（Enter）→ primary ボタン click へ委譲**（tryLogin/doCreate の多重起動防止）。ブラウザの保存/ autofill ダイアログが機能する。
+- **注意**: 上書き確認はブラウザネイティブ `confirm()`（同期）。他タブは §11 の BC 通知で後から追随（開いた瞬間は当該タブのみ即時反映）。
+
+### テスト（「SPEC OK」）
+- `urlQrWs`（URL QR 実文の `#nb:b64url` が実効 WS base と一致）/ `pwqrChkEnabled`,`pwqrShown`,`pwqrOff`（サーバーモード pw QR 併記 ON/OFF）/ `anchorWsApply`,`anchorWsSaved`（無設定→無言適用+`cfg.WSBASE` 永続）/ `anchorWsConfirm`,`anchorWsKeep`（別ドメイン→確認拒否で保持）/ `anchorWsOver`（OK で上書き）/ `formMgrJoin`,`formMgrCreate`（form 化+autocomplete）。
+- テスト運用教訓: ①同一 URL の fragment だけ変える `goto` は**リロードにならない**（boot 再実行には `reload()`）②boot 非同期完了前に evaluate すると競合（フォーム出現を待つ）③`AppSettings` は debounce 後でないと `cfg` に反映されない。

@@ -61,6 +61,16 @@ export class RoomApp {
 		this.store = new HashStore(this.cfg); // cfg 確定後に生成（HASH_ROUNDS 反映）
 		await I18N.init((AppSettings.cfg && AppSettings.cfg.LANG) || 'auto');
 		setWsBase(this.cfg.WSBASE || ''); // v2.4 §28: WS ベース URL（既定=このサイト）
+		// v2.15 §42: リンクによる WebSocket 接続設定（#部屋名:b64url(ws)）。別ドメインの既存設定があれば確認して上書き
+		const hw = RoomApp.hashWs();
+		if (hw) {
+			const cur = wsNorm((this.cfg && this.cfg.WSBASE) || '');
+			if (!cur || cur === hw || confirm(t('msg.ws.confirm', { from: cur, to: hw }))) {
+				setWsBase(hw);
+				this.cfg.WSBASE = hw;
+				if (this.opfsOk) AppSettings.set('WSBASE', hw).catch(e => ef(e, 'room_app.wsbaseAnchor'));
+			}
+		}
 		I18N.onChange = () => this.redraw(); // §11 言語変更で全 UI 即時再描画
 		this.setCssVars();
 		this.mkShell();
@@ -81,7 +91,18 @@ export class RoomApp {
 	// ハッシュの部屋名（b64url）。不正 % シーケンスでも落ちない（v1.3.1）
 	static hashName() {
 		try {
-			return decodeURIComponent((location.hash || '').replace(/^#/, ''));
+			return decodeURIComponent((location.hash || '').replace(/^#/, '')).split(':')[0]; // v2.15 §42: #部屋名:b64url(ws) の部屋名部のみ
+		} catch (e) {
+			return '';
+		}
+	}
+	// v2.15 §42: アンカーの WebSocket ベース（#部屋名:b64url(ws)）。wsNorm で正規化、不正は ''
+	static hashWs() {
+		try {
+			const h = (location.hash || '').replace(/^#/, ''),
+				i = h.indexOf(':');
+			if (i < 0) return '';
+			return wsNorm(Y.u2s(Y.U2u(decodeURIComponent(h.slice(i + 1))))); // U2u: b64url→u8（u2s は u8 必須）
 		} catch (e) {
 			return '';
 		}
@@ -344,15 +365,15 @@ export class RoomApp {
 	loginForm(rid, room, preNb) {
 		this.view = { t: 'login', rid };
 		Vw.rc(this.main);
-		const f = Vw.div(this.main, { class: 'ir-frm' });
+		const f = Vw.add(this.main, 'form', { class: 'ir-frm' }); // v2.15 §42: 実 form（ブラウザパスワードマネージャ検知）
 		Vw.add(f, 'h3').textContent = t('btn.login');
-		const nmIn = Vw.ipt(f, { type: 'text', name: 'ir-nm', placeholder: t('lbl.room.name') });
+		const nmIn = Vw.ipt(f, { type: 'text', name: 'ir-nm', placeholder: t('lbl.room.name'), autocomplete: 'off' });
 		if (room && room.nm) nmIn.value = RoomApp.unB64(room.nm) || room.nm;
 		else if (preNb) nmIn.value = RoomApp.unB64(preNb);
-		const uidIn = Vw.ipt(f, { type: 'text', name: 'ir-uid', placeholder: t('lbl.username') });
+		const uidIn = Vw.ipt(f, { type: 'text', name: 'ir-uid', placeholder: t('lbl.username'), autocomplete: 'username' }); // v2.15 §42
 		const rl = rid && AppSettings.state && (AppSettings.state.roomLogin || {})[rid];
 		if (rl) uidIn.value = rl.uid || '';
-		const pwIn = Vw.ipt(f, { type: 'password', name: 'ir-pw', placeholder: t('lbl.password') });
+		const pwIn = Vw.ipt(f, { type: 'password', name: 'ir-pw', placeholder: t('lbl.password'), autocomplete: 'current-password' }); // v2.15 §42
 		Vw.add(f, 'div', { class: 'ir-mut' }).textContent = t('diag.origin') + ': ' + location.origin; // v2.8 §34: 参加側のオリジン表示（作成者に oa 登録してもらうため）
 		// モード選択（サーバーはログイン時のみ、srvOn=false 部屋では disabled、§5.1/§5.7/§6.8）
 		Vw.add(f, 'label').textContent = t('lbl.mode');
@@ -368,8 +389,12 @@ export class RoomApp {
 			Vw.add(lb, 'span').textContent = t(key);
 		}
 		const row = Vw.div(f, { class: 'ir-row' });
-		const go = Vw.btn(row, { class: 'ir-btn' });
+		const go = Vw.btn(row, { class: 'ir-btn', type: 'button' }); // v2.15 §42: 全ボタン type=button + form submit で Enter 対応
 		Vw.sT(go, t('btn.login'));
+		Vw.ael(f, 'submit', e => {
+			e.preventDefault();
+			go.click();
+		});
 		Vw.click(go, () => {
 			const nmRaw = nmIn.value.trim();
 			const nb = room && room.nm ? room.nm : (nmRaw ? RoomApp.nb(nmRaw) : '');
@@ -384,7 +409,7 @@ export class RoomApp {
 			const mode = Object.keys(radios).find(m => radios[m].checked) || 'normal';
 			this.tryLogin({ rid: rid || '', room, nb, uid: uidIn.value.trim(), pw: pwIn.value, mode, f });
 		});
-		const sc = Vw.btn(row, { class: 'ir-btn' }); // QR スキャン（§5.4 カメラ→PNG→ペースト縮退）
+		const sc = Vw.btn(row, { class: 'ir-btn', type: 'button' }); // QR スキャン（§5.4 カメラ→PNG→ペースト縮退）
 		Vw.sT(sc, t('btn.scan'));
 		Vw.click(sc, () => this.scanFlow(d => {
 			const u = qrUnpack(d);
@@ -470,12 +495,12 @@ export class RoomApp {
 	async createForm() {
 		this.view = { t: 'create' };
 		Vw.rc(this.main);
-		const f = Vw.div(this.main, { class: 'ir-frm' });
+		const f = Vw.add(this.main, 'form', { class: 'ir-frm' }); // v2.15 §42: 実 form（パスワードマネージャ検知: username/new-password）
 		Vw.add(f, 'h3').textContent = t('btn.create');
-		const nmIn = Vw.ipt(f, { type: 'text', name: 'ir-cn', placeholder: t('lbl.room.name') });
-		const uidIn = Vw.ipt(f, { type: 'text', name: 'ir-cuid', placeholder: t('lbl.username') });
+		const nmIn = Vw.ipt(f, { type: 'text', name: 'ir-cn', placeholder: t('lbl.room.name'), autocomplete: 'off' });
+		const uidIn = Vw.ipt(f, { type: 'text', name: 'ir-cuid', placeholder: t('lbl.username'), autocomplete: 'username' });
 		Vw.add(f, 'label').textContent = t('lbl.password'); // v2.3 §27: パスワードエリアにラベル
-		const pwIn = Vw.ipt(f, { type: 'text', name: 'ir-cpw', placeholder: t('lbl.password') });
+		const pwIn = Vw.ipt(f, { type: 'text', name: 'ir-cpw', placeholder: t('lbl.password'), autocomplete: 'new-password' });
 		// v2.3 §27: 最終作成値（LS）を初期値に。部屋名には yyyy-mm-dd-hh-mm-ss を追加（既存同形式は置換）。名前無ければ names からランダム
 		const last = await this.lastDef();
 		if (last && last.nm) nmIn.value = this.withTs(last.nm);
@@ -485,7 +510,7 @@ export class RoomApp {
 		const mxIn = Vw.ipt(mxRow, { type: 'number', name: 'ir-cmx', min: '1', max: '200', step: '1' });
 		mxIn.value = String(Math.max(1, Math.round((this.cfg.MAX_IMG_BYTES || 10485760) / 1048576)));
 		const row = Vw.div(f, { class: 'ir-row' });
-		const gen = Vw.btn(row, { class: 'ir-btn' }); // 生成（512bit b64url）。v2.2 §26: 既定で自動生成済み・ボタンは再作成
+		const gen = Vw.btn(row, { class: 'ir-btn', type: 'button' }); // 生成（512bit b64url）。v2.2 §26: 既定で自動生成済み・ボタンは再作成
 		Vw.sT(gen, t('btn.pw.auto'));
 		const doGen = async () => {
 			try {
@@ -497,11 +522,15 @@ export class RoomApp {
 		Vw.click(gen, doGen);
 		doGen(); // 起動時点で自動生成パスワードをデフォルト設定
 		const xo = Toggle({ parent: row, label: 'btn.xorig', onChange: () => {} }); // xorig=true で以後メニューから oa 管理（§6.6）
-		const go = Vw.btn(row, { class: 'ir-btn' });
+		const go = Vw.btn(row, { class: 'ir-btn', type: 'button' });
 		Vw.sT(go, t('btn.create'));
-		const bw = Vw.btn(row, { class: 'ir-btn' }); // v2.5 §30: 部屋作成画面にも接続設定
+		const bw = Vw.btn(row, { class: 'ir-btn', type: 'button' }); // v2.5 §30: 部屋作成画面にも接続設定
 		Vw.sT(bw, '⚙️ ' + t('btn.ws'));
 		Vw.click(bw, () => this.wsForm());
+		Vw.ael(f, 'submit', e => { // v2.15 §42: Enter → 部屋作成
+			e.preventDefault();
+			go.click();
+		});
 		Vw.click(go, async () => {
 			const nmRaw = nmIn.value.trim(),
 				uid = uidIn.value.trim(),
@@ -1593,8 +1622,14 @@ export class RoomApp {
 		}
 	}
 	// ---- QR ユーティリティ（追加仕様: URL QR / パスワード QR 共通生成）----
-	roomUrl(ctx) { // 参加用 URL（§5.1 の #部屋名 b64url と互換）
-		return `${location.origin}/img_room.html#${encodeURIComponent(ctx.nb)}`;
+	roomUrl(ctx) { // 参加用 URL。v2.15 §42: #<部屋名>:<b64url(実効 WS ベース)> を付け、リンク/QR で接続先も運ぶ
+		const base = location.href.split('#')[0].split('?')[0];
+		let b64 = '';
+		try {
+			const ws = wsNorm(getWsBase()) || getWsBase(); // 既定でも実効値を常に同梱（http→ws 正規化、§28 と同じ wsNorm）
+			b64 = ws ? Y.B2U(Y.u2B(Y.s2u(ws))) : '';
+		} catch (e) { /* ef(e, 'room_app.roomUrl'); */ }
+		return `${base}#${encodeURIComponent(ctx.nb)}${b64 ? ':' + b64 : ''}`;
 	}
 	async qrInto(host, text, { size, file, note, secret } = {}) {
 		Vw.rc(host);
@@ -1667,14 +1702,43 @@ export class RoomApp {
 			note: t('lbl.qr.scan.url'), // スキャン時の挙動説明（追加仕様 v1.2）
 		});
 	}
-	urlQrBlock(ctx) { // サーバーモード参加者は URL QR 常時表示（追加仕様）
+	urlQrBlock(ctx) { // サーバーモード参加者は URL QR 常時表示（追加仕様）。v2.15 §42: 平文 pw 保持時はパスワード QR も同時表示するオプション（部屋単位で記憶）
 		const sec = Vw.div(this.main, { class: 'ir-sec' });
-		Vw.add(sec, 'h4').textContent = t('lbl.qr.url');
-		this.qrInto(sec, this.roomUrl(ctx), {
-			size: 160,
-			file: ctx.rid + '.url.png',
-			note: t('lbl.qr.scan.url'),
-		});
+		const draw = () => {
+			Vw.rc(sec);
+			Vw.add(sec, 'h4').textContent = t('lbl.qr.url');
+			this.qrInto(Vw.div(sec, {}), this.roomUrl(ctx), {
+				size: 160,
+				file: ctx.rid + '.url.png',
+				note: t('lbl.qr.scan.url'),
+			});
+			const row = Vw.div(sec, { class: 'ir-row' });
+			const cb = Vw.ipt(row, { type: 'checkbox', class: 'ir-chk' });
+			cb.checked = !!(AppSettings.state && (AppSettings.state['PWQR.' + ctx.rid] === true || (AppSettings.state.PWQR || {})[ctx.rid] === true)); // v2.9 §35 と同じ二重読み（平坦/ネスト）
+			cb.disabled = !ctx.plainPw;
+			Vw.add(row, 'span').textContent = t('lbl.qr.pw.always');
+			Vw.change(cb, () => {
+				const v = cb.checked ? true : null,
+					st = AppSettings.state;
+				if (st) { // AppSettings は 500ms デバウンスなのでメモリキャッシュを即反映（flush 時の base にも同じ op が入る）
+					st.PWQR = st.PWQR || {};
+					if (v === null) delete st.PWQR[ctx.rid];
+					else st.PWQR[ctx.rid] = true;
+					st['PWQR.' + ctx.rid] = v;
+				}
+				AppSettings.setState('PWQR.' + ctx.rid, v).catch(e => ef(e, 'room_app.pwqr'));
+				draw();
+			});
+			if (cb.checked && ctx.plainPw) {
+				this.qrInto(Vw.div(sec, {}), qrPack(ctx.nb, ctx.plainPw), {
+					size: 160,
+					file: ctx.rid + '.pw.png',
+					secret: true,
+					note: t('lbl.qr.secret') + ' ' + t('lbl.qr.scan.pw'),
+				});
+			}
+		};
+		draw();
 	}
 	// ---- 作成者メニュー（§5.2: QR 表示/DL・パスワード再発行・oa 管理・srvOn 切替・退室）----
 	roomMenu() {

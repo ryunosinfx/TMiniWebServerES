@@ -1085,6 +1085,87 @@ ck('hdrSwitchState', await B.evaluate(() => {
 		return ((m.AppSettings.state.roomLogin || {})[c.rid] || {}).mode === 'keep';
 	}));
 }
+// ---- v2.15 §42: URL アンカーの WebSocket 設定 / URL QR の ws 同梱 / サーバー pw QR オプション / パスワードマネージャ form ----
+ck('urlQrWs', await A.evaluate(async () => { // URL QR 実文に #nb:b64url(実効 WS base) が付く
+	const v = (document.querySelector('.ir-sec .ir-qrside input') || {}).value || '',
+		m = /#([A-Za-z0-9_%-]+):([A-Za-z0-9_-]+)$/.exec(v);
+	if (!m) return false;
+	const Y = (await import('/Y.js')).Y;
+	return Y.u2s(Y.U2u(m[2])) === location.origin.replace(/^http/, 'ws');
+}));
+// A: 切断・再接続で plainPw を失った状態をテストフックで補い再描画（実運用ではメニュー QR 流程で復活可、§39）
+await A.evaluate(pw => {
+	const c = window.__IRAPP.activeCtx();
+	if (!c.plainPw) c.plainPw = pw;
+	window.__IRAPP.redraw();
+}, CURPW);
+await A.waitForTimeout(300);
+ck('pwqrChkEnabled', await A.locator('.ir-sec input.ir-chk').isEnabled());
+await A.check('.ir-sec input.ir-chk'); // サーバーモード: パスワード QR 同時表示オプション ON
+await A.waitForTimeout(500);
+ck('pwqrShown', await A.locator('.ir-sec .ir-secret').count() >= 1);
+await A.uncheck('.ir-sec input.ir-chk');
+await A.waitForTimeout(500);
+ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
+{
+	const ws1 = Buffer.from('ws://127.0.0.1:8080').toString('base64url'),
+		ws2 = Buffer.from('ws://elsewhere.invalid:9999').toString('base64url'),
+		readWs = pg => pg.evaluate(async () => {
+			const m = await import('/modules/imgroom/ir_const.js');
+			return m.getWsBase();
+		});
+	const WB = await mk('WA');
+	await WB.goto(BASE + '/img_room.html#anchorx1:' + ws1); // 既存設定なし → 確認なく適用・永続化
+	await WB.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 }); // boot 完了（アンカー適用後）を待つ
+	ck('anchorWsApply', (await readWs(WB)) === 'ws://127.0.0.1:8080');
+	await WB.waitForTimeout(900); // AppSettings の 500ms デバウンス保存を待つ（user_settings 側 = cfg に載る）
+	ck('anchorWsSaved', await WB.evaluate(async () => {
+		const a = await import('/modules/app_settings.js');
+		return (a.AppSettings.cfg || {}).WSBASE === 'ws://127.0.0.1:8080';
+	}));
+	let asked = false;
+	WB.on('dialog', d => {
+		asked = true;
+		d.dismiss(); // 別ドメイン設定 → 確認。拒否なら保持
+	});
+	await WB.goto(BASE + '/img_room.html#anchorx2:' + ws2); // fragment 変化だけなので reload で boot を再実行させる
+	await WB.reload();
+	await WB.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 });
+	await WB.waitForTimeout(800);
+	ck('anchorWsConfirm', asked);
+	ck('anchorWsKeep', (await readWs(WB)) === 'ws://127.0.0.1:8080');
+	const WB2 = await WB.context().newPage(); // 同一 OPFS の別タブ
+	WB2.on('dialog', d => d.accept());
+	await WB2.goto(BASE + '/img_room.html#anchorx3:' + ws2); // 確認 OK → 上書き
+	await WB2.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 });
+	ck('anchorWsOver', (await readWs(WB2)) === 'ws://elsewhere.invalid:9999');
+	await WB2.evaluate(async () => { // 後始末（この文脈の既定に戻す）
+		const m = await import('/modules/imgroom/ir_const.js'),
+			a = await import('/modules/app_settings.js');
+		m.setWsBase('');
+		await a.AppSettings.set('WSBASE', '');
+	});
+	await WB2.close();
+	await WB.close();
+}
+{
+	const FM = await mk('FM');
+	await FM.goto(BASE + '/img_room.html');
+	await FM.click('button:has-text("参加")');
+	await FM.waitForSelector('form.ir-frm input[name="ir-uid"][autocomplete="username"]', { timeout: 6000 });
+	ck('formMgrJoin', await FM.evaluate(() => {
+		const f = document.querySelector('form.ir-frm');
+		return !!f && !!f.querySelector('input[name="ir-uid"][autocomplete="username"]') && !!f.querySelector('input[name="ir-pw"][autocomplete="current-password"]');
+	}));
+	await FM.goto(BASE + '/img_room.html');
+	await FM.click('button:has-text("部屋作成")');
+	await FM.waitForSelector('form.ir-frm input[name="ir-cpw"][autocomplete="new-password"]', { timeout: 6000 });
+	ck('formMgrCreate', await FM.evaluate(() => {
+		const f = document.querySelector('form.ir-frm');
+		return !!f && !!f.querySelector('input[name="ir-cuid"][autocomplete="username"]') && !!f.querySelector('input[name="ir-cpw"][autocomplete="new-password"]');
+	}));
+	await FM.close();
+}
 await N9.close();
 await K1.close();
 
