@@ -1208,6 +1208,82 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	await K1.click('.ir-mclose');
 	await K1.waitForTimeout(400);
 }
+// ---- v2.17 §44: 2MB 級本文取得はサイズ比例上限で完遂（旧固定 18s では途中でタイムアウトした） ----
+{
+	const z = await import('node:zlib'),
+		crc32 = buf => {
+			const table = [];
+			for (let n = 0; n < 256; n++) {
+				let c = n;
+				for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+				table[n] = c >>> 0;
+			}
+			let crc = 0xffffffff;
+			for (const by of buf) crc = table[(crc ^ by) & 255] ^ (crc >>> 8);
+			return (crc ^ 0xffffffff) >>> 0;
+		},
+		pngChunk = (type, data) => {
+			const td = Buffer.concat([Buffer.from(type, 'ascii'), data]),
+				len = Buffer.alloc(4),
+				crc = Buffer.alloc(4);
+			len.writeUInt32BE(data.length);
+			crc.writeUInt32BE(crc32(td));
+			return Buffer.concat([len, td, crc]);
+		};
+	// 決定的 xorshift 乱数 RGBA（gzip 不能）→ 約 2.36MB PNG。圧縮後 chunk 数 ≒ 290 × CHUNK_GAP_MS 100ms ≒ 29s で旧固定上限 18s を必ず超える
+	const PW_ = 768, PH = 768,
+		raw = Buffer.alloc(PH * (PW_ * 4 + 1));
+	for (let i = 0, x = 123456789; i < raw.length; i++) // xorshift32（gzip 耐性の高品質擬似乱数。LCG 上位ビットは圧縮され chunk 数が稼げない）
+		if (i % (PW_ * 4 + 1)) {
+			x ^= x << 13;
+			x = (x ^ (x >>> 17)) >>> 0;
+			x = (x ^ (x << 5)) >>> 0;
+			raw[i] = x & 255;
+		}
+	const ihdr = Buffer.alloc(13);
+	ihdr.writeUInt32BE(PW_, 0);
+	ihdr.writeUInt32BE(PH, 4);
+	ihdr[8] = 8;
+	ihdr[9] = 6;
+	const bigPng = Buffer.concat([
+		Buffer.from('\x89PNG\r\n\x1a\n', 'latin1'),
+		pngChunk('IHDR', ihdr),
+		pngChunk('IDAT', z.deflateSync(raw, { level: 0 })),
+		pngChunk('IEND', Buffer.alloc(0)),
+	]);
+	ck('bigPngSize', bigPng.length > 2 * 1024 * 1024 && bigPng.length < 4 * 1024 * 1024, Math.round(bigPng.length / 1024) + 'KB');
+	const BIGROOM = 'BIG' + Date.now().toString(36).slice(-4),
+		T1 = await mk('T1'),
+		T2 = await mk('T2');
+	await T1.goto(BASE + '/img_room.html');
+	await T1.click('button:has-text("部屋作成")');
+	await T1.fill('input[name="ir-cn"]', BIGROOM);
+	await T1.fill('input[name="ir-cuid"]', 'BIGA');
+	await T1.fill('input[name="ir-cpw"]', 'big-pw');
+	await T1.fill('input[name="ir-cmx"]', '5');
+	await T1.click('.ir-frm button:has-text("部屋作成")');
+	await T1.waitForSelector('input[type=file]', { timeout: 20000 });
+	await T1.setInputFiles('input[type=file]', { name: 'big.png', mimeType: 'image/png', buffer: bigPng });
+	await T1.waitForSelector('.ir-thumb', { timeout: 30000 });
+	await T2.goto(BASE + '/img_room.html');
+	await T2.click('button:has-text("参加")');
+	await T2.fill('input[name="ir-nm"]', BIGROOM);
+	await T2.fill('input[name="ir-uid"]', 'BIGB');
+	await T2.fill('input[name="ir-pw"]', 'big-pw');
+	await T2.click('.ir-frm button:has-text("ログイン")');
+	await T2.waitForSelector('input[type=file]', { timeout: 20000 });
+	await T2.waitForSelector('.ir-thumb', { timeout: 20000 });
+	const t0 = Date.now();
+	await T2.click('.ir-thumb'); // 未保有 2.3MB を P2P 取得
+	await T2.waitForSelector('.ir-mbx .ir-img[src]', { timeout: 60000 });
+	const bigMs = Date.now() - t0;
+	console.log('bigFetchMs:', bigMs);
+	ck('bigFetchOk', true);
+	ck('bigFetchProportional', bigMs > 18000); // 旧固定上限（18s）超えの実転送で成功 = 比例化が効いている
+	await T2.click('.ir-mclose');
+	await T1.close();
+	await T2.close();
+}
 await N9.close();
 await K1.close();
 

@@ -325,7 +325,13 @@ export class FileTransfer {
 			const h = await this._race(this._take(p, 'h'), this.cfg.REQ_TIMEOUT); // H 待ち（同時に bitmap 登録済み）
 			if (!h) return { why: `${holder}: H ヘッダなし/不正` };
 			if (this.dead || q.cancelled) throw Error('cancelled');
-			const ab = await this._race(p.it.itP, this.cfg.STALL_MS + this.cfg.REQ_TIMEOUT); // chunk 収集完了待ち
+			// v2.17 §44: chunk 収集の全体上限はチャンク数（＝ファイルサイズ）に比例させる。
+			// 送出は CHUNK_GAP_MS 間隔（既定 100ms/chunk）なので 2MB でも 18s 固定では途中で落ちた。
+			// 実停止は per-transfer の STALL ウォッチドッグ（フレーム到着で再武装、§8.6）が見るため、
+			// ここは中継マージン 60ms/chunk を加えたサイズ比例値とする
+			const it0 = p.it,
+				budget = this.cfg.REQ_TIMEOUT + this.cfg.STALL_MS + (it0.c || 0) * (this.cfg.CHUNK_GAP_MS + 60);
+			const ab = await this._race(it0.itP, budget);
 			if (!(ab instanceof ArrayBuffer)) throw Error('転送破棄');
 			return { ab };
 		} finally {
