@@ -1166,6 +1166,48 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	}));
 	await FM.close();
 }
+// ---- v2.16 §43: ビューア両端クリックで前後切替 / 左右キー / ダブルで全画面 ----
+{
+	await K1.click(`.ir-thumb[data-h10="${kh}"]`);
+	await K1.waitForSelector('.ir-mbx .ir-img[src]', { timeout: 20000 });
+	await K1.waitForTimeout(700);
+	const cur0 = await K1.evaluate(() => window.__IRAPP._vBox && window.__IRAPP._vBox._h10);
+	const meta0 = await K1.evaluate(() => (document.querySelector('.ir-meta3') || {}).textContent || '');
+	ck('navStart', !!cur0 && cur0 === kh);
+	ck('navZones', await K1.locator('.ir-mbx .ir-navz').count() === 2);
+	await K1.click('.ir-navz.r'); // 右 1/3: 次へ（単クリックは 300ms 遅延で確定・未保有は P2P 取得を待つ）
+	const cur1 = await K1.waitForFunction(h => {
+		const bo = window.__IRAPP._vBox;
+		return !!(bo && bo._h10 && bo._h10 !== h);
+	}, cur0, { timeout: 15000 }).then(() => K1.evaluate(() => window.__IRAPP._vBox && window.__IRAPP._vBox._h10)).catch(() => cur0);
+	ck('navNext', !!cur1 && cur1 !== cur0);
+	await K1.waitForTimeout(500); // 開き直後の添付データ描画を待つ
+	const meta1 = await K1.evaluate(() => (document.querySelector('.ir-meta3') || {}).textContent || '');
+	ck('navMeta', !!meta1 && meta1 !== meta0); // 添付データ（投稿者/日付/SHA）も追従
+	await K1.click('.ir-navz.l'); // 左 1/3: 前へ（cur0 復帰は取得済みで速いが同じ待ち方）
+	const back = await K1.waitForFunction(h => {
+		const bo = window.__IRAPP._vBox;
+		return !!(bo && bo._h10 === h);
+	}, cur0, { timeout: 15000 }).then(() => K1.evaluate(() => window.__IRAPP._vBox && window.__IRAPP._vBox._h10)).catch(() => '');
+	ck('navPrev', back === cur0);
+	await K1.keyboard.press('ArrowRight'); // キーでも同様に
+	const fwd = await K1.waitForFunction(h => {
+		const bo = window.__IRAPP._vBox;
+		return !!(bo && bo._h10 === h);
+	}, cur1, { timeout: 15000 }).then(() => K1.evaluate(() => window.__IRAPP._vBox && window.__IRAPP._vBox._h10)).catch(() => '');
+	ck('navKeyR', fwd === cur1);
+	await K1.dblclick('.ir-mbx .ir-img'); // ダブルクリックで全画面
+	await K1.waitForTimeout(500);
+	ck('fsDbl', await K1.evaluate(() => !!window.__IRAPP._vBox && window.__IRAPP._vBox.classList.contains('ir-fs')));
+	await K1.click('.ir-mbx .ir-img'); // 全画面中の中央タップ → 解除確認 → 終了
+	await K1.waitForTimeout(400);
+	ck('fsExitPanel', await K1.locator('.ir-mbx .ir-fsc').count() === 1);
+	await K1.click('.ir-fsc .ir-btn.warn');
+	await K1.waitForTimeout(500);
+	ck('fsExited', await K1.evaluate(() => !window.__IRAPP._vBox || !window.__IRAPP._vBox.classList.contains('ir-fs')));
+	await K1.click('.ir-mclose');
+	await K1.waitForTimeout(400);
+}
 await N9.close();
 await K1.close();
 

@@ -269,6 +269,8 @@ new RoomApp() .boot() // window.onload から呼ぶ
 //   参加処理より先に適用。別ドメインの既存 WSBASE は confirm で確認。roomUrl(ctx) は逆方向（URL QR/リンク）に同形式を生成。
 //   参加/作成フォームは <form class="ir-frm"> + autocomplete(username/current-password/new-password)、submit→primary click 委譲。
 //   urlQrBlock に PWQR.<rid> checkbox（サーバーモードの pw QR 併記オプション、app_state 永続・メモリ即反映）。
+//   v2.16 §43: viewer は .ir-navz 帯（左右 1/3）で全項目 ts 降順の前後切替（未保有は fetchBody、周回）、
+//   単クリック 300ms 遅延／連続クリックと中央 2 クリック（320ms 以内）で enterFs。←/→ は全画面でなくても navStep。
 ```
 - 起動順: `OPFS.i('imgroom')` → `AppSettings.init(CFG)` → `I18N.init(state LANG)` → i18n pack 登録（`./locales.js` に ja/en 辞書同梱可）→ ヘッダー（使用量/モード/言語/ゴミ箱/一括DL）→ ルーム一覧（ホーム）または hash 部屋指定ならログイン画面 → 認証後タブ + RoomSession/各モジュール生成。
 - URL クエリ上書き: `GRID_COLS/GRID_ROWS/CAL_VIEW` のみ（非永続）。

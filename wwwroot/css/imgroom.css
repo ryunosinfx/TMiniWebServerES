@@ -718,3 +718,48 @@ input[type="file"]:active::file-selector-button {
 	padding: 4px 6px;
 	margin: 0 4px;
 }
+
+/* v2.16 §43: ビューアの 3 分割両端クリック帯（前/次へ）とダブルで全画面 */
+.ir-imgwrap {
+	position: relative;
+}
+.ir-navz {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: 33.3%;
+	z-index: 3;
+	display: flex;
+	align-items: center;
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 0.15s;
+	user-select: none;
+	-webkit-user-select: none;
+}
+.ir-navz.l {
+	left: 0;
+	justify-content: flex-start;
+	background: linear-gradient(90deg, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0));
+}
+.ir-navz.r {
+	right: 0;
+	justify-content: flex-end;
+	background: linear-gradient(270deg, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0));
+}
+.ir-navz:hover,
+.ir-navz:active {
+	opacity: 0.8;
+}
+.ir-navz-a {
+	font-size: 2.2em;
+	color: #fff;
+	text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+	padding: 0 12px;
+	pointer-events: none;
+}
+@media (hover: none) {
+	.ir-navz {
+		opacity: 0.3;
+	}
+}

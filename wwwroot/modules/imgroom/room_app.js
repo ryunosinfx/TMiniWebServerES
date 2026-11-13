@@ -1451,11 +1451,14 @@ export class RoomApp {
 				Vw.rel(document, 'keydown', onFKey);
 				return;
 			}
-			if (!box._fsWire || !box.classList.contains('ir-fs') || box._fsc) return;
+			if (!box._fsWire || box._fsc) return; // v2.16 §43: 全画面でなくても左右キーで前後切替
 			if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
 				e.preventDefault();
-				if (this._slOn && !this._slPaused) this.slArm();
-				this.slStep(e.key === 'ArrowRight' ? 1 : -1).catch(er => ef(er, 'room_app.fsStep'));
+				const dir = e.key === 'ArrowRight' ? 1 : -1;
+				if (box.classList.contains('ir-fs')) {
+					if (this._slOn && !this._slPaused) this.slArm();
+					this.slStep(dir).catch(er => ef(er, 'room_app.fsStep'));
+				} else if (box._navStep) box._navStep(dir).catch(er => ef(er, 'room_app.navKey'));
 			}
 		};
 		Vw.ael(document, 'keydown', onFKey);
@@ -1564,8 +1567,17 @@ export class RoomApp {
 		};
 		Vw.click(bFs, () => (box.classList.contains('ir-fs') ? askExit() : enterFs(false)));
 		Vw.click(bSl, () => (this._slOn ? askExit() : enterFs(true)));
-		Vw.click(wrap, () => {
-			if (box.classList.contains('ir-fs')) askExit(); // 全画面中の画像タップは解除確認
+		let tapTs = 0;
+		Vw.ael(wrap, 'click', () => {
+			if (box.classList.contains('ir-fs')) {
+				askExit(); // 全画面中の画像タップは解除確認
+				return;
+			}
+			const now = Date.now(); // v2.16 §43: 画像中央のダブルクリック/ダブルタップ（クリック間隔 320ms 以内）で全画面
+			if (now - tapTs < 320) {
+				tapTs = 0;
+				enterFs(false);
+			} else tapTs = now;
 		});
 		// v2.5 §30: ←/→ は冒頭登録の onFKey で処理（v2.8 §34 で即時登録化）
 		if (this._fsPend) {
@@ -1575,6 +1587,61 @@ export class RoomApp {
 			enterFs(sl); // slideshow の送器で開き直したセッションを全画面+自動送りで再開
 		}
 		box._fsWire = true; // v2.8 §34: askExit/enterFs/seq 配線完了（以降のキーは処理）
+		// ---- v2.16 §43: 表示領域 3 分割の両端クリックで前後の画像へ（添付データ込みで開き直し）。
+		// 単クリック=切替（260ms 遅延でダブルと区別）、同一ゾーン連続クリック=全画面。順は部屋全項目の ts 降順（未保有はそのつど取得）
+		const navSeq = () => {
+			const cs = ctx && ctx.collection;
+			if (!cs) return [h10];
+			const list = cs.roomItems()
+				.filter(it => it && it.h10 && !it.trashed)
+				.sort((a, b) => (b.ts || 0) - (a.ts || 0))
+				.map(it => it.h10);
+			return list.length ? list : [h10];
+		};
+		box._navStep = async dir => {
+			if (!this._vBox || this._vBox !== box || !box._mdl || !box._mdl.isConnected) return;
+			const seq = navSeq(),
+				start = seq.indexOf(box._h10);
+			if (seq.length < 2 || start < 0) return;
+			for (let sc = 1; sc <= seq.length; sc++) { // 取得失敗項目は同じ方向の次候補へ（キー送りと同じ方針）
+				const i = ((start + dir * sc) % seq.length + seq.length) % seq.length,
+					nxt = seq[i];
+				if (nxt === box._h10) continue;
+				const b = (await this.bodyOf(nxt).catch(() => null)) || (ctx.cal ? await ctx.cal.fetchBody(nxt) : null);
+				if (b) {
+					this.viewer(nxt, b); // 通常ビューアのまま開き直し（画像も添付データも切替）
+					return;
+				}
+			}
+		};
+		let navT = 0, zoneTap = 0;
+		const mkZone = side => {
+			const z = Vw.add(wrap, 'div', { class: 'ir-navz ' + side });
+			Vw.add(z, 'span', { class: 'ir-navz-a' }).textContent = side === 'l' ? '‹' : '›';
+			Vw.ael(z, 'click', e => {
+				e.stopPropagation();
+				if (box.classList.contains('ir-fs')) { // 全画面中は帯タップでも送り（キーと共通の保持 seq）
+					if (this._slOn && !this._slPaused) this.slArm();
+					this.slStep(side === 'l' ? -1 : 1).catch(er => ef(er, 'room_app.navFs'));
+					return;
+				}
+				const now = Date.now();
+				if (navT || now - zoneTap < 320) { // ダブル（2 回目）→ 全画面表示、単独切替は取り消し
+					clearTimeout(navT);
+					navT = 0;
+					zoneTap = 0;
+					enterFs(false);
+					return;
+				}
+				zoneTap = now;
+				navT = setTimeout(() => {
+					navT = 0;
+					box._navStep(side === 'l' ? -1 : 1).catch(er => ef(er, 'room_app.navz'));
+				}, 300);
+			});
+		};
+		mkZone('l');
+		mkZone('r');
 		// 画像下は 3 行のみ: 投稿者・部屋 / 投稿日・MimeType / SHA256Sum（追加仕様 v1.2）
 		const mb = Vw.add(box, 'div', { class: 'ir-meta3' });
 		if (meta) {
