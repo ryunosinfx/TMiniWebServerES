@@ -618,7 +618,7 @@ ck('dlToastPersist', (await A.locator('.ir-toast').count()) === 1);
 await A.waitForTimeout(2000);
 ck('dlToastEnd', (await A.locator('.ir-toast').count()) === 0);
 await A.click('.ir-mclose');
-ck('hdrModeRadio', await B.evaluate(() => document.querySelectorAll('.ir-hd input[type="radio"][name="ir-hdrmode"]').length === 2));
+ck('hdrModeSelect', await B.evaluate(() => document.querySelectorAll('.ir-hd select.ir-hmode').length === 1)); // v2.14 §41: ヘッダーは 3 値 select
 ck('syncZoneOn', await B.evaluate(() => {
 	const z = document.querySelector('.ir-seczone');
 	if (!z || !z.classList.contains('ir-srvon')) return false;
@@ -1050,6 +1050,41 @@ await N9.waitForSelector('.ir-mbx img[src]', { timeout: 20000 });
 await N9.click('.ir-mclose');
 await N9.waitForTimeout(1200);
 ck('normalNoAdopt', await N9.evaluate(h => window.__IRAPP.activeCtx().collection.mset.has(h) === false, nh));
+// ---- v2.14 §41: ログイン済み画面からのモード切替（B: normal→keep で取得保持化） ----
+ck('hdrSwitchSelect', await B.evaluate(() => {
+	const sel = document.querySelector('.ir-hd select.ir-hmode');
+	return !!sel && [...sel.options].map(o => o.value).join(',') === 'normal,keep,sync';
+}));
+await B.selectOption('.ir-hd select.ir-hmode', 'keep');
+ck('hdrSwitchState', await B.evaluate(() => {
+	const c = window.__IRAPP.activeCtx();
+	return c.mode === 'keep' && !!c.cal && c.cal.keep === true;
+}));
+{
+	const bh = await B.evaluate(() => {
+		const c = window.__IRAPP.activeCtx(),
+			own = new Set(c.collection.mset),
+			el = [...document.querySelectorAll('.ir-thumb')].find(e => e.dataset.h10 && !own.has(e.dataset.h10));
+		return el ? el.dataset.h10 : '';
+	});
+	ck('hdrSwitchTarget', !!bh);
+	if (bh) {
+		await B.click(`.ir-thumb[data-h10="${bh}"]`);
+		await B.waitForSelector('.ir-mbx img[src]', { timeout: 20000 });
+		await B.click('.ir-mclose');
+		await B.waitForTimeout(1500);
+		ck('hdrSwitchAdopt', await B.evaluate(async h => {
+			const app = window.__IRAPP,
+				c = app.activeCtx();
+			return c.collection.mset.has(h) && !!(await app.store.get(h));
+		}, bh));
+	}
+	ck('hdrSwitchPersist', await B.evaluate(async () => {
+		const m = await import('/modules/app_settings.js'),
+			c = window.__IRAPP.activeCtx();
+		return ((m.AppSettings.state.roomLogin || {})[c.rid] || {}).mode === 'keep';
+	}));
+}
 await N9.close();
 await K1.close();
 

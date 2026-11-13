@@ -150,19 +150,14 @@ export class RoomApp {
 		e.title = Vw.add(this.hd, 'b');
 		e.usage = Vw.add(this.hd, 'span', { class: 'ir-mut' }); // §9.11 使用量
 		e.modeWrap = Vw.div(this.hd, { class: 'ir-row' }); // §5.2 モード切替（server では非表示）
-		// v2.2 §26: 通常⇄同期はヘッダーでもラジオスイッチ（意味が分かるラベル。参加フォームと同じ 同期/通常）
-		e.modeR = Vw.div(e.modeWrap, { class: 'ir-rsw' });
-		e.rMode = {};
-		e.rModeLbl = {};
-		for (const [on, key] of [[true, 'hdr.mode.sync'], [false, 'hdr.mode.normal']]) {
-			const lb = Vw.add(e.modeR, 'label', { class: 'ir-rw' });
-			const ip = Vw.ipt(lb, { type: 'radio', name: 'ir-hdrmode' });
-			e.rModeLbl[on] = Vw.add(lb, 'span');
-			Vw.ael(ip, 'change', () => {
-				if (ip.checked) this.setMode(on);
-			});
-			e.rMode[on] = ip;
+		// v2.2 §26 → v2.14 §41: ログイン画面でもモード選択可（通常都度/取得保持/同期の select。server セッションでは非表示のまま）
+		e.modeSel = Vw.add(e.modeWrap, 'select', { class: 'ir-hmode' });
+		for (const v of ['normal', 'keep', 'sync']) {
+			const o = Vw.ce('option');
+			o.value = v;
+			e.modeSel.appendChild(o);
 		}
+		Vw.change(e.modeSel, () => this.setModeHdr(e.modeSel.value));
 		e.lang = Vw.add(this.hd, 'select', { class: 'ir-langs' }); // 言語 auto/ja/en
 		for (const v of ['auto', 'ja', 'en']) {
 			const o = Vw.ce('option');
@@ -184,8 +179,10 @@ export class RoomApp {
 	lblHdr() { // 言語再描画対応
 		const e = this.hdEls;
 		Vw.sT(e.title, t('app.title'));
-		Vw.sT(e.rModeLbl[true], t('hdr.mode.sync')); // v2.2 §26: ラジオスイッチのラベル（言語切替対応）
-		Vw.sT(e.rModeLbl[false], t('hdr.mode.normal'));
+		const mo = e.modeSel.options; // v2.14 §41: ヘッダーモード select（言語切替対応）
+		mo[0].textContent = t('mode.normal.fetch');
+		mo[1].textContent = t('mode.normal.keep');
+		mo[2].textContent = t('hdr.mode.sync');
 		const opts = e.lang.options;
 		opts[0].textContent = t('hdr.lang') + ': auto';
 		opts[1].textContent = t('hdr.lang') + ': 日本語';
@@ -250,23 +247,23 @@ export class RoomApp {
 			ctx = this.rooms.get(this.active);
 		const disp = v => (v ? '' : 'none');
 		Vw.sS(e.modeWrap, { display: ctx && ctx.mode !== 'server' ? '' : 'none' });
-		if (ctx && e.rMode) {
-			const en = !!(ctx.sync && ctx.sync.enabled);
-			e.rMode[true].checked = en;
-			e.rMode[false].checked = !en;
-		}
+		if (e.modeSel) e.modeSel.value = ctx && ctx.mode !== 'server' ? ctx.mode : 'normal'; // v2.14 §41
 		for (const k of ['trash', 'bulk', 'logout']) Vw.sS(e[k], { display: ctx ? disp(true) : disp(false) });
 		Vw.sS(e.menu, { display: ctx && ctx.room.cr === ctx.uid ? '' : 'none' }); // 作成者のみ §5.3
 	}
 	activeCtx() {
 		return this.rooms.get(this.active) || null;
 	}
-	setMode(on) { // ヘッダートグル: 通常⇄同期（§9.9。server は来ない）
+	setModeHdr(m) { // ヘッダー select: 通常（都度）⇄通常（保持）⇄同期（§9.9/v2.14 §41。server セッションでは変更不可）
 		const ctx = this.activeCtx();
-		if (!ctx || ctx.mode === 'server') return;
-		ctx.sync.enable(!!on);
-		AppSettings.setNested('MODE.' + ctx.rid, on ? 'sync' : 'normal').catch(e => ef(e, 'room_app.mode'));
+		if (!ctx || ctx.mode === 'server' || !['normal', 'keep', 'sync'].includes(m) || ctx.mode === m) return;
+		ctx.mode = m;
+		ctx.sync.enable(m === 'sync');
+		if (ctx.cal) ctx.cal.keep = m === 'keep'; // 即時反映（次回 fetchBody/表示から）
 		if (ctx.foot) Vw.sS(ctx.foot, { display: ctx.sync.enabled ? '' : 'none' });
+		AppSettings.setNested('MODE.' + ctx.rid, m).catch(e => ef(e, 'room_app.mode'));
+		const rl = (AppSettings.state && AppSettings.state.roomLogin || {})[ctx.rid];
+		if (rl) AppSettings.setState('roomLogin.' + ctx.rid, Object.assign({}, rl, { mode: m })).catch(e => ef(e, 'room_app.rlMode')); // 次回起動の自動再参加にも保持
 	}
 	redraw() { // 言語切替等: 現在画面を作り直し
 		this.lblHdr();
@@ -1000,11 +997,15 @@ export class RoomApp {
 		this.rooms.set(rid, ctx);
 		return ctx;
 	}
-	// v2.13 §40: 取得保持モード — 本文取得完了で OPFS 永続化+manifest 採用（自が保持者化: 以降ローカル優先・他機へも供給可）
+	// v2.13 §40: 取得保持モード — 本文取得完了で OPFS 永続化+manifest 採用（自が保持者化: 以降ローカル優先・他機へも供給可）。
+	// v2.14 §41: ab=null は「本文は既にローカル」（ビューア自動保存分などの manifest 採用のみ）。mset 既存は no-op
 	async keepAdopt(ctx, h10, ab) {
 		try {
-			await this.store.put(ab);
-			this.usageDirty();
+			if (ctx.collection.mset.has(h10)) return;
+			if (ab) {
+				await this.store.put(ab);
+				this.usageDirty();
+			}
 			const meta = ctx.collection.metas.get(h10) || await this.store.metaGet(h10);
 			if (meta && ctx.collection.adopt(meta)) {
 				await ctx.collection.saveManifest();

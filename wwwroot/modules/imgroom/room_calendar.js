@@ -326,7 +326,10 @@ export class RoomCalendar {
 		const run = async () => {
 			if (this.keep && this.img && typeof this.img.bodyOf === 'function') { // v2.13 §40: 保持済みは転送せずローカルから（全保持者不参加でも表示可）
 				const b1 = await this.img.bodyOf(h10);
-				if (b1) return b1;
+				if (b1) {
+					if (this.afterBody) Promise.resolve(this.afterBody(h10, null)).catch(() => {}); // v2.14 §41: 自動保存済みの本文も manifest 採用（表示を遅延させない）
+					return b1;
+				}
 			}
 			const ho = this.col && typeof this.col.holdersOf === 'function' ? this.col.holdersOf(h10) : null;
 			if (ho && ho.allDeparted) { // 全保持者不参加: 取得不能（§5.5/§12）

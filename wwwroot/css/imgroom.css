@@ -708,3 +708,13 @@ input[type="file"]:active::file-selector-button {
 	transform: scale(.96);
 	filter: brightness(.8);
 }
+
+/* v2.14 §41: ヘッダーのモード select */
+.ir-hmode {
+	background: var(--ir-bg2);
+	color: var(--ir-fg);
+	border: 1px solid var(--ir-line);
+	border-radius: 6px;
+	padding: 4px 6px;
+	margin: 0 4px;
+}

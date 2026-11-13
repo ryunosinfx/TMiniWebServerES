@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.13
+- ステータス: ドラフト v2.14
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1340,3 +1340,17 @@ ponta 側を**強制再読込**したうえで再試行するとコンソール�
 ### テスト（「SPEC OK」）
 - `keepRadio`（radio 出現）/ `keepSeeThumb` / `keepAdopt`（開封後 mset+store.get 実在）/ `keepHolders`（**同じ h10** で A 側 holdersOf に KEE が入る）/ `normalNoAdopt`（通常は mset 不変の対照）。
 - テスト運用教訓: ①部屋作成後の**パスワード発行**でテスト変数の PW は失効する→作成者セッションの `plainPw` を読む ②`room.nm` は b64url 形式のことがあり参加入力には plaintext 変数を使う ③クラッシュ時も ck 結果が見えるよう `CHECKFAIL` 即时出力と `process.on('exit')` サマリを追加。
+
+## 41. 追加仕様 v2.14: ログイン済み画面からのモード選択（ヘッダー select）
+要求（2026-11-13）: §40 のモード（都度取得/取得保持）を、ログイン後の画面からも選択できるようにする。
+
+- **ヘッダー UI**: 既存の「通常⇄同期」ラジオスイッチ（v2.2 §26）を **3 値 select `.ir-hmode`** に置換:「通常（都度取得）/通常（取得保持）/同期」。サーバーモードセッションでは従来通り全体非表示（server への昇格/降格は再ログイン経由のみ、§6.8 のため変更しない）。
+- **切替の反映（setModeHdr）**:
+  1. `ctx.mode` 更新と同期機構 `ctx.sync.enable(m==='sync')`（§9.9 の既存挙動）、フッター表示追従。
+  2. `ctx.cal.keep = (m==='keep')` で**即時反映**（次回表示・取得から保持モード動作）。
+  3. 永続化: `MODE.<rid>` に加え **`roomLogin.<rid>.mode` も更新**し、次回起動の自動再参加で同じモードに戻る（§9.12）。
+  4. 認証は再取得しない（mode は参加時の W 採決値のまま。keep/sync はクライアント挙動のみ。他参加者への J md 通知は不要）。
+- **manifest 採用の補完（v2.14）**: 従来ビューア表示時の自動保存（v1.x 追加仕様）で本文だけ先に OPFS へ載っている場合、keep 切替後の表示は**ローカルヒット**となるため afterBody が呼ばれず manifest 採用が漏れていた。fetchBody のローカルヒット経路でも `afterBody(h10, null)`（ab=null＝本文保存済み前提の**採用のみ**）を fire-and-forget で呼び、keep の「取得済み＝保持者」を担保。`keepAdopt` は mset 既存なら no-op（表示ごとの再 put 禁止）。
+
+### テスト（「SPEC OK」）
+- `hdrModeSelect`（ヘッダーに select 1 個。旧 radio 検証を置換）/ `hdrSwitchSelect`（選択肢 normal,keep,sync）/ `hdrSwitchState`（mode+cal.keep 即時反映）/ `hdrSwitchAdopt`（切替後に既保存本文でも mset 採用+store 実在）/ `hdrSwitchPersist`（roomLogin.mode='keep'）。
