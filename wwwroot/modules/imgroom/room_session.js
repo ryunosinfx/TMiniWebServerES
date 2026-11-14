@@ -723,6 +723,7 @@ export class RoomSession {
 			case 'S':
 			case 'T':
 			case 'X':
+			case 'g': // v2.19 §46: タグ登録表（q/reg）→ room_app ルータへ（ir は 1 文字規約）
 				if (!this._st.authed) return; // データ系は認証後有効（§6.1）
 				if (p.ir === 'M') this._touchParticipant(p.uid);
 				if (this.onFrame) try {

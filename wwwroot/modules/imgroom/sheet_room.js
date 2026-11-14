@@ -335,7 +335,7 @@ export class SheetRoom {
 			const pl = this.placed.get(e.h) || {};
 			page.push({
 				h: e.h, n: e.n, r: e.r, u: e.u, ts: e.ts, t: e.t, l: e.l, s: e.s, c: e.c,
-				sid: pl.sid, p: pl.p,
+				sid: pl.sid, p: pl.p, ...(e.tg && e.tg.length ? { tg: e.tg } : {}), // v2.19 §46: タグも manifest で周知
 			});
 			if (page.length >= MAX_M) pages.push(page), (page = []);
 		}

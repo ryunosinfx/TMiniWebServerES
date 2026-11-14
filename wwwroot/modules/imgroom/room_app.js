@@ -915,10 +915,21 @@ export class RoomApp {
 		ctx._ingestMeta = async e => {
 			try {
 				const m = await this.store.metaGet(e.h);
-				if (!m) await this.store.metaPut({ h: e.h, n: e.n, r: e.r || [nb], u: e.u, ts: e.ts, t: e.t, l: e.l, s: e.s, c: e.c, d: null });
-				else if (!(m.r || []).includes(nb)) {
-					(m.r = m.r || []).push(nb); // §9.5 部屋横断: r マージ
-					await this.store.metaPut(m);
+				if (!m) {
+					const o = { h: e.h, n: e.n, r: e.r || [nb], u: e.u, ts: e.ts, t: e.t, l: e.l, s: e.s, c: e.c, d: null };
+					if (Array.isArray(e.tg) && e.tg.length) o.tg = e.tg.slice(0, 16); // v2.19 §46
+					await this.store.metaPut(o);
+				} else {
+					let ch = false;
+					if (!(m.r || []).includes(nb)) { (m.r = m.r || []).push(nb); ch = true; } // §9.5 部屋横断: r マージ
+					if (Array.isArray(e.tg) && e.tg.length) { // v2.19 §46: タグは加算マージ（union・16 個上限）
+						const cur = Array.isArray(m.tg) ? m.tg : (m.tg = []);
+						for (const x of e.tg) {
+							const tgx = Collection.normTag(x);
+							if (tgx && !cur.includes(tgx) && cur.length < 16) { cur.push(tgx); ch = true; }
+						}
+					}
+					if (ch) await this.store.metaPut(m);
 				}
 			} catch (er) {
 				ef(er, 'room_app.ingest ' + e.h);
@@ -966,6 +977,7 @@ export class RoomApp {
 						}
 					}, 1000 + Math.random() * 3000);
 			} else if (p.ir === IR.B) hk.onB(p, from);
+			else if (p.ir === IR.TG) this._onTG(ctx, p, from).catch(e => ef(e, 'room_app.TG')); // v2.19 §46
 		};
 		// ---- セッションイベント（§12 Toast/強制ログアウト）----
 		ctx.session.on('open', () => {
@@ -981,6 +993,7 @@ export class RoomApp {
 			this.renderTabs();
 			if (ctx.room.cr === ctx.uid) this.pushC(ctx).catch(() => {}); // 追加仕様: 作成者は設定(mx 等)を再配信（cg 同一分は受信側で無視・新規参加者は採用）
 			if (ctx.sheet) ctx.sheet.broadcastMNow(); // §9.4 自保持索引の周知
+			setTimeout(() => { try { this._tagAsk(ctx); } catch (e) { ef(e, 'room_app.tagAsk'); } }, 1500 + Math.random() * 1500); // v2.19 §46: 同期時に部屋タグ登録表を取得（遅延で参加直後の roster 確定を待つ）
 			ctx.setItems();
 			if (this.active === rid) this.renderRoom(rid);
 		});
@@ -1435,6 +1448,106 @@ export class RoomApp {
 			}
 		}
 	}
+	// ================= v2.19 §46: 部屋タグ登録表（一括管理ファイル）=================
+	// OPFS に rooms 単位の実ファイル `tagreg/<rid>.json`（{ver,tags:[{t,last,n}]}）。
+	// TG フレームで q=照会/reg=一括配布。加算マージ（last=最大・n=max+ローカル再計算なし）、500 件上限で last 古い順に落とす
+	_tagReg(rid) {
+		return (this._regs && this._regs.get(rid)) || [];
+	}
+	async _regLoad(ctx) {
+		if (!this._regs) this._regs = new Map();
+		if (this._regs.has(ctx.rid)) return this._regs.get(ctx.rid);
+		let tags = [];
+		try {
+			const p = 'tagreg/' + ctx.rid + '.json';
+			if (await OPFS.isEf(p)) {
+				const o = JSON.parse(Y.u2s(await OPFS.r(p)));
+				if (o && Array.isArray(o.tags)) tags = o.tags.filter(x => x && Collection.normTag(x.t)).map(x => ({ t: Collection.normTag(x.t), last: Number(x.last) || 0, n: Number(x.n) || 0 }));
+			}
+		} catch (e) {
+			ef(e, 'room_app.regLoad');
+		}
+		tags.sort((a, b) => b.last - a.last);
+		this._regs.set(ctx.rid, tags);
+		return tags;
+	}
+	async _regSave(ctx) {
+		try {
+			await OPFS.w('tagreg/' + ctx.rid + '.json', Y.s2u(JSON.stringify({ ver: 1, ts: Date.now(), tags: this._tagReg(ctx.rid).slice(0, 500) })));
+		} catch (e) {
+		 ef(e, 'room_app.regSave');
+		}
+	}
+	_tagTouch(ctx, tags) {
+		// 使用（画像への付与/クラウドクリック）で last を更新、n を++（新規タグは追加）
+		const list = this._tagReg(ctx.rid),
+			now = Date.now();
+		for (const raw of tags) {
+			const t = Collection.normTag(raw);
+			if (!t) continue;
+			const it = list.find(x => x.t === t);
+			if (it) { it.last = now; it.n++; }
+			else list.push({ t, last: now, n: 1 });
+		}
+		list.sort((a, b) => b.last - a.last);
+		if (list.length > 500) list.length = 500;
+		this._regSave(ctx);
+	}
+	_tagAnnounce(ctx) {
+		try {
+			ctx.session.sendFrame(Protocol.mk(IR.TG, { uid: ctx.session.uid, reg: { tags: this._tagReg(ctx.rid).slice(0, 500) } }));
+		} catch (e) {
+			ef(e, 'room_app.tagAnnounce');
+		}
+	}
+	_tagAsk(ctx) {
+		const ps = ((ctx.session.state && ctx.session.state.participants) || []).filter(x => x && x.uid && x.uid !== ctx.session.uid);
+		if (!ps.length) return;
+		const pick = ps[Math.floor(Math.random() * ps.length)].uid;
+		ctx.session.sendFrame(Protocol.mk(IR.TG, { uid: ctx.session.uid, to: pick, q: 1 }));
+	}
+	async _onTG(ctx, p, from) {
+		const me = ctx.session.uid;
+		if (p.to && p.to !== me) return; // 宛先指定は自宛のみ処理（ループ防止）
+		if (p.q === 1) { // 照合: 自登録表を送り返す（未所持=空）
+			await this._regLoad(ctx);
+			ctx.session.sendFrame(Protocol.mk(IR.TG, { uid: me, to: p.uid || from, reg: { tags: this._tagReg(ctx.rid).slice(0, 500) } }));
+			return;
+		}
+		if (p.reg && Array.isArray(p.reg.tags)) { // 一括受信 → 不足分を自分の配下ファイルへ加算
+			const list = await this._regLoad(ctx);
+			let ch = false;
+			for (const x of p.reg.tags) {
+				if (!x) continue;
+				const t = Collection.normTag(x.t);
+				if (!t) continue;
+				const it = list.find(y => y.t === t);
+				if (!it) { list.push({ t, last: Number(x.last) || 0, n: Number(x.n) || 0 }); ch = true; }
+				else if ((Number(x.last) || 0) > it.last || (Number(x.n) || 0) > it.n) { it.last = Math.max(it.last, Number(x.last) || 0); it.n = Math.max(it.n, Number(x.n) || 0); ch = true; }
+			}
+			if (ch) {
+				list.sort((a, b) => b.last - a.last);
+				if (list.length > 500) list.length = 500;
+				await this._regSave(ctx);
+				if (this._tagCloudRep) this._tagCloudRep(); // 開いているビューアのクラウド更新
+			}
+		}
+	}
+	async _tagAdd(ctx, h10, raw) {
+		const t = Collection.normTag(raw);
+		if (!t) return;
+		const m = ctx.collection.metas.get(h10);
+		const cur = Array.isArray(m && m.tg) ? m.tg : [];
+		if (!cur.includes(t)) {
+			if (cur.length >= 16) { Toast(I18N.t('msg.tag.limit')); return; }
+			await ctx.collection.mergeTags(h10, [t]);
+			ctx.sheet.rebuild(ctx.collection.manifestEntries()).then(() => ctx.sheet.broadcastMNow()).catch(e => ef(e, 'room_app.tagRebuild')); // 再構築後 M 全周知（タグのみの変更はシート差分に出ないため強制、§9.4）
+		}
+		this._tagTouch(ctx, [t]); // last/n 更新（自ファイル）
+		this._tagAnnounce(ctx); // 登録表も即周知（同期を待たず反映。加算マージ）
+		if (this._tagCloudRep) this._tagCloudRep();
+	}
+
 	async viewer(h10, blob) {
 		// 同一画像の再クリック無視・別画像表示時は旧ビューアを閉じる（モーダル多重防止、追加仕様 v1.2）
 		if (this._vPend === h10) return;
@@ -1670,6 +1783,47 @@ export class RoomApp {
 			}
 			ab0 = null; // SHA 計算まで保持したら即時解放（低メモリ化 v1.3）
 		})();
+		// ---- v2.19 §46: タグ編集行とタグクラウド（直近使用 10 個=下段、残り=部分一致 10 個まで）----
+		{
+			const tgs = () => { const mm = ctx.collection.metas.get(h10); return Array.isArray(mm && mm.tg) ? mm.tg : []; };
+			const row = Vw.add(mb, 'div', { class: 'ir-row ir-tgrow' });
+			Vw.add(row, 'span', { class: 'ir-mut' }).textContent = I18N.t('lbl.tags');
+			const chips = Vw.div(row, { class: 'ir-tgchips' });
+			const can = !ctx.collection.isTrashed(h10);
+			let inp = null;
+			if (can) {
+				inp = Vw.add(row, 'input', { class: 'ir-tgin', type: 'text', maxlength: '32', placeholder: I18N.t('lbl.tag.ph') });
+				inp.autocomplete = 'off';
+				const ab2 = Vw.btn(row, { class: 'ir-btn ir-tgadd', type: 'button' });
+				Vw.sT(ab2, I18N.t('btn.tag.add'));
+				const doAdd = () => { const v = inp.value.trim(); if (v) { inp.value = ''; this._tagAdd(ctx, h10, v); } };
+				Vw.click(ab2, doAdd);
+				Vw.ael(inp, 'keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
+				Vw.ael(inp, 'input', () => cloudRep());
+			}
+			const filt = Vw.add(mb, 'div', { class: 'ir-row ir-tgfilt' });
+			const rec = Vw.add(mb, 'div', { class: 'ir-row ir-tgrecent' });
+			const mkB = (par, x) => {
+				const b = Vw.btn(par, { class: 'ir-tgbtn', type: 'button' });
+				b.textContent = '#' + x;
+				b.dataset.tg = x;
+				Vw.click(b, () => this._tagAdd(ctx, h10, x));
+			};
+			const cloudRep = () => {
+				if (!this._vBox || this._vBox !== box) return;
+				Vw.rc(chips);
+				for (const x of tgs()) Vw.add(chips, 'span', { class: 'ir-tgchip' }).textContent = '#' + x;
+				const list = this._tagReg(ctx.rid);
+				Vw.rc(rec);
+				for (const it of list.slice(0, 10)) mkB(rec, it.t); // 直近使用順 10 個を下段
+				Vw.rc(filt);
+				const q = ((inp && inp.value) || '').trim().toLowerCase();
+				if (q) for (const it of list.slice(10).filter(x => x.t.toLowerCase().includes(q)).slice(0, 10)) mkB(filt, it.t); // 残りは部分一致 10 個まで
+			};
+			this._tagCloudRep = cloudRep;
+			cloudRep();
+			this._regLoad(ctx).then(() => cloudRep()).catch(() => {});
+		}
 		const ext = (meta && meta.t ? String(meta.t).split('/')[1] : '') || 'jpg';
 		const row = Vw.div(box, { class: 'ir-mbtns' });
 		const dl = Vw.btn(row, { class: 'ir-btn' }); // DL のみ（保存は自動確定のため廃止、追加仕様）

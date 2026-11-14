@@ -801,3 +801,49 @@ input[type="file"]:active::file-selector-button {
 	font-size: 0.85em;
 	cursor: pointer;
 }
+
+/* v2.19 §46: タグ編集行とタグクラウド */
+.ir-tgchips {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-right: 6px;
+}
+.ir-tgchip {
+	background: var(--ir-bg2);
+	border: 1px solid var(--ir-line);
+	border-radius: 10px;
+	padding: 1px 8px;
+	font-size: 0.85em;
+}
+.ir-tgin {
+	background: var(--ir-bg);
+	color: var(--ir-fg);
+	border: 1px solid var(--ir-line);
+	border-radius: 6px;
+	padding: 2px 6px;
+	width: 120px;
+	font-size: 0.9em;
+}
+.ir-tgadd {
+	padding: 2px 8px;
+	font-size: 0.85em;
+}
+.ir-tgbtn {
+	background: var(--ir-bg2);
+	color: var(--ir-fg);
+	border: 1px solid var(--ir-line);
+	border-radius: 10px;
+	padding: 1px 8px;
+	font-size: 0.82em;
+	cursor: pointer;
+}
+.ir-tgbtn:hover {
+	background: var(--ir-hl);
+}
+.ir-tgrecent,
+.ir-tgfilt {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}

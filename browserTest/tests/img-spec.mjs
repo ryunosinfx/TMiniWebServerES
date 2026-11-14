@@ -300,7 +300,7 @@ ck('nativeToggle', await B.evaluate(() => {
 	return w.classList.contains('native') && im.clientWidth === im.naturalWidth;
 }));
 // v1.2: メタ 3 行 + SHA256 + ズーム 6 段/選択状態
-ck('meta3Lines', await B.evaluate(() => document.querySelectorAll('.ir-meta3 .ir-row').length === 3));
+ck('meta3Lines', await B.evaluate(() => document.querySelectorAll('.ir-meta3 .ir-row:not(.ir-tgrow):not(.ir-tgfilt):not(.ir-tgrecent)').length === 3)); // v2.19 §46: タグ行は数えない
 ck('sha256', await B.evaluate(async () => {
 	const sel = [...document.querySelectorAll('.ir-meta3 .ir-row')].find(r => r.textContent.includes('SHA256'));
 	if (!sel) return false;
@@ -1338,6 +1338,92 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	}
 	ck('pickClosed', await B.locator('.ir-pick').count() === 0); // 選択で閉じる
 	ck('pickClosed', await B.locator('.ir-pick').count() === 0); // 選択で閉じる
+}
+// ---- v2.19 §46: タグ（meta.tg / ビューア編集 / 登録表 TG 同期 / クラウド） ----
+{
+	// 自己所有（確実に自 store 保持）の項目で検証する（v2.19 教訓: サーバー機でも他成员投稿の本文は初回は P2P 取得で遅延/失敗し得る）
+	const hOwn = await A.evaluate(() => {
+		const c = window.__IRAPP.activeCtx(),
+			it = c.collection.roomItems().find(x => x.mine && !x.trashed);
+		return it && it.h10;
+	});
+	ck('tgOwnItem', !!hOwn);
+	await A.click(`.ir-thumb[data-h10="${hOwn}"]`);
+	await A.waitForSelector('.ir-mbx .ir-img[src]', { timeout: 20000 });
+	await A.waitForTimeout(600);
+	ck('tgInputShown', await A.locator('.ir-mbx .ir-tgin').count() === 1);
+	const hTag = hOwn;
+	await A.fill('.ir-mbx .ir-tgin', 'sakuranbo');
+	await A.click('.ir-mbx .ir-tgadd');
+	await A.waitForTimeout(500);
+	ck('tgChip', (await A.locator('.ir-mbx .ir-tgchip').first().textContent().catch(() => '')).includes('sakuranbo'));
+	ck('tgMeta', await A.evaluate(h => { const c = window.__IRAPP.activeCtx(); return (c.collection.metas.get(h).tg || []).includes('sakuranbo'); }, hTag));
+	ck('tgCloudRecent', await A.locator('.ir-mbx .ir-tgrecent .ir-tgbtn[data-tg="sakuranbo"]').count() === 1);
+	const seeB = await B.waitForFunction(h => {
+		const c = window.__IRAPP.activeCtx(),
+			m = c.collection.metas.get(h);
+		return !!(m && Array.isArray(m.tg) && m.tg.includes('sakuranbo'));
+	}, hTag, { timeout: 20000 }).then(() => true).catch(() => false);
+	ck('tgPropB', seeB);
+	let seeK = await K1.waitForFunction(() => {
+		const c = window.__IRAPP.activeCtx(),
+			regs = window.__IRAPP._regs;
+		return !!(regs && (regs.get(c.rid) || []).some(x => x.t === 'sakuranbo'));
+	}, { timeout: 15000 }).then(() => true).catch(() => false);
+	if (!seeK) {
+		console.log('tgKDbg', JSON.stringify(await K1.evaluate(() => {
+			const c = window.__IRAPP.activeCtx();
+			return { parts: (c.session.state.participants || []).map(x => x.uid), me: c.session.uid, regs: !!window.__IRAPP._regs, rid: c.rid };
+		})));
+		await K1.evaluate(() => window.__IRAPP._tagAsk(window.__IRAPP.activeCtx()));
+		await K1.waitForTimeout(5000);
+		seeK = await K1.evaluate(() => {
+			const c = window.__IRAPP.activeCtx(),
+				regs = window.__IRAPP._regs;
+			return !!(regs && (regs.get(c.rid) || []).some(x => x.t === 'sakuranbo'));
+		});
+		console.log('tgKAsk', seeK);
+	}
+	ck('tgRegK1', seeK); // TG 一括配布（編集時 announce）で K1 の配下ファイルに不足分追加
+	ck('tgRegFileK1', await K1.evaluate(async () => {
+		const { OPFS } = await import('/OPFS.js'), // OPFS ドメイン(<ハッシュ>/)基準の相対パス解決を使う
+			c = window.__IRAPP.activeCtx(),
+			p2 = 'tagreg/' + c.rid + '.json';
+		if (!(await OPFS.isEf(p2))) return false;
+		const o = JSON.parse(Y2u(await OPFS.r(p2)));
+		return Array.isArray(o.tags) && o.tags.some(x => x.t === 'sakuranbo');
+		function Y2u(u8) { return new TextDecoder().decode(u8); }
+	}));
+	// B からも同一画像（ts 降順トップ）を開いてクラウドクリック追加 → A へ逆伝播
+	await B.click(`.ir-thumb[data-h10="${hTag}"]`); // 同一画像（B は未保持でも P2P 取得して開く）
+	await B.waitForSelector('.ir-mbx .ir-img[src]', { timeout: 30000 });
+	await B.waitForTimeout(600);
+	ck('tgChipB', (await B.locator('.ir-mbx .ir-tgchip').first().textContent().catch(() => '')).includes('sakuranbo'));
+	const hTag2 = await B.evaluate(() => window.__IRAPP._vBox._h10);
+	ck('tgSameItem', hTag2 === hTag);
+	await B.click('.ir-mbx .ir-tgrecent .ir-tgbtn[data-tg="sakuranbo"]'); // クリック追加（既存なので重複付与なし・last 更新のみ）
+	await B.waitForTimeout(400);
+	ck('tgNoDup', await B.evaluate(h => window.__IRAPP.activeCtx().collection.metas.get(h).tg.filter(x => x === 'sakuranbo').length, hTag2).then(n => n === 1));
+	await B.fill('.ir-mbx .ir-tgin', 'hana');
+	await B.click('.ir-mbx .ir-tgadd');
+	await B.waitForTimeout(500);
+	const seeA2 = await A.waitForFunction(h => {
+		const m = window.__IRAPP.activeCtx().collection.metas.get(h);
+		return !!(m && (m.tg || []).includes('hana'));
+	}, hTag2, { timeout: 20000 }).then(() => true).catch(() => false);
+	ck('tgPropA', seeA2);
+	// 部分一致フィルタ: 残り（11 個目以降）→ 10 個まで。多数タグ注入で検証（メモリ上登録表）
+	await B.evaluate(() => {
+		const c = window.__IRAPP.activeCtx(),
+			regs = window.__IRAPP._regs;
+		for (let i = 1; i <= 30; i++) regs.get(c.rid).push({ t: 'bungaku' + i, last: Date.now() - i * 1000, n: 1 }); // 直近10の後に来る過去タグ 22 個（slice(10) 側）
+	});
+	await B.fill('.ir-mbx .ir-tgin', 'bungaku');
+	await B.waitForTimeout(400);
+	ck('tgFilter10', await B.evaluate(() => document.querySelectorAll('.ir-mbx .ir-tgfilt .ir-tgbtn').length) === 10); // 部分一致 22 → 10 個上限
+	await A.click('.ir-mclose');
+	await B.click('.ir-mclose');
+	await A.waitForTimeout(300);
 }
 await N9.close();
 await K1.close();

@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.18
+- ステータス: ドラフト v2.19
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1406,3 +1406,16 @@ ponta 側を**強制再読込**したうえで再試行するとコンソール�
 
 ### テスト（「SPEC OK」）
 - `pickBtn`（ボタン 1 個）/ `pickSetupPast`（メモリ上メタの ts を 10 日前へ拟似変更で複数日化）/ 日モード切替後 `pickDays2`（候補 2 日以上）/ `pickTarget`（現在位置と違う日を選択）/ `pickJumpTop`（実効スクロール量 = セクション番号×ページ高さ、実際に動かす）/ `pickHeaderTop`（DOM 実寸でセクション top が表示領域上端 ±8px）/ `pickClosed`（選択で閉じる）。
+
+## 46. 追加仕様 v2.19: タグ（画像メタデータ・ビューア編集・部屋一括管理ファイル・同期）
+要求（2026-11-14）: メタデータにタグを追加。画像の詳細画面からタグを追加。**部屋単位で一括管理したファイル**を用意。同期時にタグと一括管理ファイルも取得し、不足分は自分の配下ファイルへ追加。入力画面（詳細画面のタグ入力欄下）に**タグクラウド**を、直近使用順 10 個を下段ボタン、残りは部分一致フィルター 10 個までで表示。
+
+- **meta.tg（§7.1 拡張）**: 画像メタに `tg: string[]`（正規化=制御空白潰し・trim・32 字、1 画像 16 個上限、重複不可）。共有時は既定なし（キー省略）。M フレームの manifest エントリ（`sheet_room.mPages`）にも `tg` を同載し、**既存画像のタグ編集も M で周知**する。受信側 `room_app._ingestMeta` は **tg を union マージ**（加算のみ。削除は v1 非対象、§15 に記録）。`collection.setTags/mergeTags` が meta と manifest エントリの tg を同期し**全書き**（差分行方式のため）＋ emit。タグのみの変更はシート差分に出ないため、編集後は `sheet.rebuild → broadcastMNow()` で **M 全周知を強制**（§9.4 の gen 機構再利用）。
+- **部屋一括管理ファイル**: OPFS の実ファイル **`tagreg/<rid>.json`**（`{ver:1, ts, tags:[{t, last, n}]}`、500 件上限で last 古い順に切断）。`last`=最終使用（付与またはクラウドクリックで更新）、`n`=使用回数。`RoomApp._regLoad/_regSave/_tagReg` でメモリキャッシュ（ctx.rid 毎 Map）。
+- **同期フレーム `g`（§8.2 拡張）**: `IR.TG='g'`。**ir は 1 文字規約**（`Protocol.parse` が `ir.length!==1` で破棄—2 文字 'TG' は全経路で静默 dropout した教訓）。形式: `{ir:'g', uid, to?, q:1}`（照会）/ `{ir:'g', uid, to?, reg:{tags:[…]}}`（一括配布）。認証後（データ系ケースグループへ合流）。**編集時に announce（無宛 reg 一括）で即反映**、**同期（authOk 後 1.5–3s 遅延）にいずれか成员へ q 照会**して不足分を取得、**加算マージ**（t 単位で last=max・n=max）で自分の配下ファイルへ追記（§要求「不足がアレば自分の配下ファイルに追加」）。`to` 付きは自宛のみ処理→ループなし（応答は q なし reg、announce 受信側は再送しない）。
+- **詳細画面（ビューア §43 併設）タグ行**: meta3 内に `タグ` 行＋現タグ chips（`.ir-tgchip`）＋入力欄（`.ir-tgin` maxlength 32）＋追加ボタン（`.ir-tgadd`、Enter でも可）。ゴミ箱項目は編集不可（chips 表示のみ）。追加→`_tagAdd`（正規化・上限 16 で Toast）→ setTags→rebuild+broadcastMNow→`_tagTouch`→announce→即再描画。
+- **タグクラウド（同画面下 2 行）**: 下段 `.ir-tgrecent` = 登録表の**直近使用順 10 個**ボタン（`.ir-tgbtn`、クリックで即追加）。上段 `.ir-tgfilt` = **11 個目以降**を入力部分一致（大小無視）で絞り込み**10 個まで**（入力中は常時再計算、`_tagCloudRep` で TG 受信時も更新）。
+
+### テスト（「SPEC OK」）
+- `tgOwnItem`/`tgInputShown`/`tgChip`/`tgMeta`/`tgCloudRecent`（下段に即出現）/ `tgPropB`（M 強制周知で B の meta.tg に union）/ `tgRegK1`（announce→K1 の登録表に不足分追加）/ `tgRegFileK1`（K1 の OPFS `tagreg/<rid>.json` へ永続、`import('/OPFS.js')` の `OPFS.isEf/r` で照会）/ `tgChipB`,`tgSameItem`（B が同一画像で chips 確認）/ `tgNoDup`（クラウド再クリックで重複付与なし）/ `tgPropA`（B 編集→A へ逆伝播）/ `tgFilter10`（残り 22 候補の部分一致→10 個上限）。
+- 教訓: ①**サーバー機でも他成员投稿の本文は初回 P2P 取得で遅延/失敗し得る**ため、ビューア系テストは**自己所有項目**基準で開く（A の最新=.ir-thumb 先頭が他成员投稿で 20s 開かない事故）。②`Playwright で同一ブラウザの別ページは別 browser.newContext()` で初めて storage 分離（既定 newPage 共有だと StoreTX オーナー争いでミラーになり、OPFS 同一のため**伝播テストが全滅の偽陽性/偽陰性**になる—再現スクリプトは必ず context 分離）。

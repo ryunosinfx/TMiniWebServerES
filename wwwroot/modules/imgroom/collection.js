@@ -170,10 +170,47 @@ export class Collection {
 	_manifestAdd(meta) {
 		if (this.mset.has(meta.h)) return false;
 		const e = { h: meta.h, n: meta.n, r: meta.r, u: meta.u, ts: meta.ts, t: meta.t, l: meta.l, s: meta.s };
+		if (Array.isArray(meta.tg) && meta.tg.length) e.tg = meta.tg.slice(); // v2.19 §46
 		this.manifest.push(e);
 		this.mset.add(meta.h);
 		if (this._dirty) this._dirty.add.push(e); // v1.5: saveManifest で 1 行追記
 		return true;
+	}
+	// v2.19 §46: タグ正規化（制御文字→空白、1 語 32 字、1 画像 16 個、重複除去）
+	static normTag = s => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 32);
+	async setTags(h10, tags) {
+		// meta.tg 更新（追記マージ済み配列を渡す）。manifest エントリにも同期し全書き（M 再周知で各部屋成员へ伝播）
+		const m = this.metas.get(h10) || (await this.store.metaGet(h10));
+		if (!m || m.d) return null;
+		const out = [], seen = new Set();
+		for (const x of tags || []) {
+			const t = Collection.normTag(x);
+			if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+			if (out.length >= 16) break;
+		}
+		m.tg = out;
+		await this.store.metaPut(m);
+		this.metas.set(h10, m);
+		const e = this.manifest.find(x => x && x.h === h10);
+		if (e) {
+			if (out.length) e.tg = out.slice(); else delete e.tg;
+			await this._writeManifestFull(); // 差分行方式のため変更は全書き（タグ編集は低頻度）
+		}
+		this.emit('changed', { added: [], removed: [] });
+		return out;
+	}
+	// 採用マージ（M 受信の tg union は room_app._ingestMeta 側。ここでは追加分のみ反映）
+	async mergeTags(h10, add) {
+		const m = this.metas.get(h10) || (await this.store.metaGet(h10));
+		if (!m || m.d) return null;
+		const cur = Array.isArray(m.tg) ? m.tg.slice() : [];
+		let ch = false;
+		for (const x of add || []) {
+			const t = Collection.normTag(x);
+			if (t && !cur.includes(t) && cur.length < 16) { cur.push(t); ch = true; }
+		}
+		if (!ch) return cur;
+		return this.setTags(h10, cur);
 	}
 	// v2.13 §40: 既存 meta を自房 manifest に採用（取得保持モード）。meta 自体は書かない（既に存在）
 	adopt(meta) {
