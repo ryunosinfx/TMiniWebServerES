@@ -115,11 +115,28 @@ export const wsUrl = rid => `${getWsBase()}/ws/chat/${rid}`;
 
 // 仕様 §6.4 QR ペイロード: TMIWR1:<ridB64U の代わりに部屋名b64url>:<password>（ASCII のみ）
 export const QR_PREFIX = 'TMIWR1:';
-export const qrPack = (nameB64U, pw) => `${QR_PREFIX}${nameB64U}:${pw}`;
+export const qrPack = (nameB64U, pw, claim) => `${QR_PREFIX}${nameB64U}:${pw}${claim ? '#' + claim : ''}`; // v2.20 §47: クレーム(#ct.cr.pk.sg)を同梱
 export const qrUnpack = s => {
 	if (!s || !s.startsWith(QR_PREFIX)) return null;
 	const rest = s.slice(QR_PREFIX.length);
 	const i = rest.indexOf(':');
 	if (i < 1) return null;
-	return { nameB64U: rest.slice(0, i), pw: rest.slice(i + 1).replace(/ +$/, '') }; // 末尾スペースは検証ループ由来なので除去（§6.4）
+	let pwPart = rest.slice(i + 1),
+		claim = '';
+	const j = pwPart.indexOf('#'); // pw は b64url（# を含まない、§6.3 newPw）
+	if (j >= 0) {
+		claim = pwPart.slice(j + 1);
+		pwPart = pwPart.slice(0, j);
+	}
+	return { nameB64U: rest.slice(0, i), pw: pwPart.replace(/ +$/, ''), claim }; // 末尾スペースは検証ループ由来なので除去（§6.4）
+};
+// v2.20 §47: 部屋作成者クレーム。`<ct>.<crB64U>.<pkB64U>.<sgB64U>`（ct=作成時刻 ms、cr=参加者名 b64url(utf8)、
+// pk=SPKI 公開鍵 b64url、sg=RSA-SHA256(JSON 文字列 {nm,uid,ct}) の SHA-256 ダイジェストを秘密鍵で署名した b64url）
+export const claimMake = ({ ct, cr, pk, sg }) => `${ct}.${cr}.${pk}.${sg}`;
+export const claimParse = s => {
+	if (!s || typeof s !== 'string') return null;
+	const a = s.split('.');
+	if (a.length !== 4 || !/^\d{1,20}$/.test(a[0])) return null;
+	for (const x of a.slice(1)) if (!x || !/^[A-Za-z0-9_-]+$/.test(x)) return null;
+	return { ct: +a[0], cr: a[1], pk: a[2], sg: a[3] };
 };

@@ -15,7 +15,7 @@ import { ImgProc, SliceCache } from '../img_proc.js';
 import { QRTool } from '../qr_tool.js';
 import { QRScan } from '../qr_scan.js';
 import { Toggle, Badge, Toast, useLabel } from '../widgets.js';
-import { CFG, STORAGE, ridOf, qrPack, qrUnpack, IR, QR_PREFIX, WS_PREFIX, getWsBase, setWsBase, wsNorm } from './ir_const.js';
+import { CFG, STORAGE, ridOf, qrPack, qrUnpack, IR, QR_PREFIX, WS_PREFIX, getWsBase, setWsBase, wsNorm, claimMake, claimParse } from './ir_const.js';
 import { Protocol } from './ir_protocol.js';
 import { RoomSession } from './room_session.js';
 import { Hibernate } from './hibernate.js';
@@ -99,13 +99,123 @@ export class RoomApp {
 	// v2.15 §42: アンカーの WebSocket ベース（#部屋名:b64url(ws)）。wsNorm で正規化、不正は ''
 	static hashWs() {
 		try {
-			const h = (location.hash || '').replace(/^#/, ''),
-				i = h.indexOf(':');
-			if (i < 0) return '';
-			return wsNorm(Y.u2s(Y.U2u(decodeURIComponent(h.slice(i + 1))))); // U2u: b64url→u8（u2s は u8 必須）
+			const a = (location.hash || '').replace(/^#/, '').split(':'); // v2.20 §47: #<nm>:<ws>:<claim>（ws は 2 節目のみ）
+			if (a.length < 2) return '';
+			return wsNorm(Y.u2s(Y.U2u(decodeURIComponent(a[1])))); // U2u: b64url→u8（u2s は u8 必須）
 		} catch (e) {
 			return '';
 		}
+	}
+	// v2.20 §47: アンカーの作成者クレーム（3 節目）。不正は null
+	static hashClaim() {
+		try {
+			const a = (location.hash || '').replace(/^#/, '').split(':');
+			return a.length >= 3 ? claimParse(decodeURIComponent(a[2])) && decodeURIComponent(a[2]) : null;
+		} catch (e) {
+			return null;
+		}
+	}
+	// ---- v2.20 §47: 部屋作成者の鍵とクレーム（ECDSA P-256/SHA-256。この実装環境は WebCrypto RSA generateKey 非対応で ECDSA のみ可）----
+	// 署名対象= JSON.stringify({nm:部屋名平文, uid:参加者名, ct:作成時刻})（SHA256withECDSA ダイジェスト署名）。OPFS keys/<rid>.json に鍵組と自クレームを保管
+	static crJson = (nm, uid, ct) => JSON.stringify({ nm, uid, ct }); // キー順固定（決定性）
+	static CR_EC = { name: 'ECDSA', hash: { name: 'SHA-256' } };
+	async _crKeys(rid, nmPlain, uid, ct) {
+		const kp = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']),
+			spki = await crypto.subtle.exportKey('spki', kp.publicKey),
+			priv = await crypto.subtle.exportKey('jwk', kp.privateKey),
+			json = RoomApp.crJson(nmPlain, uid, ct),
+			sg = Y.B2U(Y.u2B(new Uint8Array(await crypto.subtle.sign(RoomApp.CR_EC, kp.privateKey, Y.s2u(json))))), // u2B: u8→base64、B2U: url 安全化（Y.js の B2U は文字列入力）
+			claim = claimMake({ ct, cr: Y.B2U(Y.u2B(Y.s2u(uid))), pk: Y.B2U(Y.u2B(new Uint8Array(spki))), sg });
+		await OPFS.w('keys/' + rid + '.json', Y.s2u(JSON.stringify({ ver: 1, json, ct, uid, claim, privJwk: priv })).buffer);
+		return claim;
+	}
+	async _crKeysLoad(rid) {
+		try {
+			const p = 'keys/' + rid + '.json';
+			if (!(await OPFS.isEf(p))) return null;
+			return JSON.parse(Y.u2s(await OPFS.r(p)));
+		} catch (e) {
+			return null;
+		}
+	}
+	// 署名再作成一致: 鍵所持者は署名を再作成し、元クレーム sg と新規署名の両方が公開鍵検証で一致 → 所持を証明＝部屋作成者認定
+	// （ECDSA は署名が非決定的なので**検証一致**で判定する。Byte 同一比較はしない）
+	async _crSelfCheck(ctx) {
+		const o = await this._crKeysLoad(ctx.rid);
+		if (!o || !o.privJwk || !o.json) return false;
+		try {
+			const c = claimParse(o.claim);
+			if (!c) return false;
+			const priv = await crypto.subtle.importKey('jwk', o.privJwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']),
+				pub = await crypto.subtle.importKey('spki', Y.U2u(c.pk), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
+				data = Y.s2u(o.json),
+				orig = await crypto.subtle.verify(RoomApp.CR_EC, pub, Y.U2u(c.sg), data),
+				fresh = await crypto.subtle.sign(RoomApp.CR_EC, priv, data),
+				re = await crypto.subtle.verify(RoomApp.CR_EC, pub, fresh, data);
+			return orig && re;
+		} catch (e) {
+			ef(e, 'room_app.crSelfCheck');
+			return false;
+		}
+	}
+	// クレーム文字列+部屋名平文 → 署名照合（公開鍵でダイジェスト検証）
+	async _crVerify(claim, nmPlain) {
+		const c = claimParse(claim);
+		if (!c) return { ok: false };
+		try {
+			let uid;
+			try {
+				uid = Y.u2s(Y.U2u(c.cr));
+			} catch (e) {
+				return { ok: false };
+			}
+			const pub = await crypto.subtle.importKey('spki', Y.U2u(c.pk), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
+				json = RoomApp.crJson(nmPlain, uid, c.ct),
+				ok = await crypto.subtle.verify(RoomApp.CR_EC, pub, Y.U2u(c.sg), Y.s2u(json));
+			return { ok: !!ok, cr: uid, ct: c.ct };
+		} catch (e) {
+			return { ok: false };
+		}
+	}
+	_claimFor(ctx) {
+		return (ctx && ctx._crInfo && ctx._crInfo.claim) || '';
+	}
+	// 参加/作成/autoJoin 共通: クレームの解決→検証→自機署名一致→room.cr 補完→表示
+	async _creatorFlow(ctx) {
+		let claim = RoomApp.hashClaim() || '';
+		const keys = await this._crKeysLoad(ctx.rid);
+		if (!claim && keys && keys.claim) claim = keys.claim; // 自機が鍵を持つ=作成者自身。QR を経由しなくてもクレーム復元可
+		if (!claim) {
+			try {
+				const p = 'claim/' + ctx.rid + '.json'; // 受領済みクレーム（QR/URL 経由で保存）
+				if (await OPFS.isEf(p)) claim = (JSON.parse(Y.u2s(await OPFS.r(p))) || {}).claim || '';
+			} catch (e) { /* noop */ }
+		}
+		if (!claim) return;
+		const nmPlain = RoomApp.unB64(ctx.nb) || ctx.title || '',
+			v = await this._crVerify(claim, nmPlain);
+		ctx._crInfo = { claim, ok: v.ok, cr: v.cr || '', ct: (claimParse(claim) || {}).ct || 0, self: false };
+		if (v.ok && !ctx.room.cr && v.cr) ctx.room.cr = v.cr; // 作成者不明状態の救済: 署名検証できたクレームから認識
+		if (keys && (await this._crSelfCheck(ctx))) { // 署名再作成一致 → この端末は作成者
+			ctx._crInfo.self = true;
+			if (v.ok && ctx.room.cr !== ctx.uid && ctx._crInfo.cr === ctx.uid) ctx.room.cr = ctx.uid;
+			else if (!v.ok && ctx._crInfo.cr === ctx.uid) ctx.room.cr = ctx.uid;
+		}
+		if (RoomApp.hashClaim()) await OPFS.w('claim/' + ctx.rid + '.json', Y.s2u(JSON.stringify({ claim, ts: Date.now() })).buffer).catch(() => {}); // アンカー由来は保存（次回以降も認識）
+		if (this.active === ctx.rid) this.paintCr(ctx);
+	}
+	paintCr(ctx) {
+		if (!ctx || !ctx._crInfo || !ctx.partsEl) return;
+		let el = ctx.partsEl.parentElement && ctx.partsEl.parentElement.querySelector('.ir-crinfo');
+		if (!el) {
+			const bar = ctx.partsEl.parentElement;
+			if (!bar) return;
+			el = Vw.add(bar, 'span', { class: 'ir-crinfo' });
+		}
+		const i = ctx._crInfo;
+		el.textContent = I18N.t('lbl.cr') + ' ' + (i.cr || '?') + ' ' + (i.self ? I18N.t('lbl.cr.self') : i.ok ? I18N.t('lbl.cr.ok') : I18N.t('lbl.cr.bad'));
+		el.classList.toggle('bad', !i.ok && !i.self);
+		el.classList.toggle('ok', i.ok || i.self);
 	}
 	qOverride() { // §11: GRID_COLS/GRID_ROWS/CAL_VIEW のみ（デバッグ用・永続化しない）
 		let p;
@@ -293,6 +403,92 @@ export class RoomApp {
 		else this.home();
 	}
 	// ---- ホーム（§5.1: 部屋一覧は OPFS rooms/*/room.json の nm、§10）----
+	// v2.21 §48: 最終参加日 yyyy-mm-dd-hh-mm（ローカルタイムゾーン）
+	static ljFmt(ms) {
+		const d = new Date(ms),
+			z = n => String(n).padStart(2, '0');
+		return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + '-' + z(d.getHours()) + '-' + z(d.getMinutes());
+	}
+	// 部屋マニフェスト（manifest.<uid>.jsonl / legacy .json）に載る h10 集合
+	async _roomHs(rid) {
+		const out = new Set();
+		try {
+			const dir = 'rooms/' + rid;
+			for (const f of await OPFS.ls(dir)) {
+				if (!f || f.s === undefined) continue; // ファイルのみ
+				const k = String(f.k).split('/').pop();
+				if (!/^manifest\..+\.jsonl?$/.test(k)) continue;
+				const txt = Y.u2s(await OPFS.r(dir + '/' + k));
+				if (k.endsWith('.json')) {
+					let arr = [];
+					try {
+						arr = JSON.parse(txt);
+					} catch (e) { /* 不正は無視 */ }
+					for (const e of arr || []) if (e && e.h) out.add(e.h);
+				} else {
+					const m = new Map(); // x 行除去・last-wins（loadManifest と同一規則）
+					for (const line of txt.split('\n')) {
+						if (!line) continue;
+						let e;
+						try {
+							e = JSON.parse(line);
+						} catch (er) {
+							continue;
+						}
+						if (!e || !e.h) continue;
+						if (e.x) m.delete(e.h);
+						else m.set(e.h, 1);
+					}
+					for (const h of m.keys()) out.add(h);
+				}
+			}
+		} catch (e) { /* 部屋直下の走査失敗は 0 扱い */ }
+		return out;
+	}
+	// OPFS に本体実在する画像枚数（インスタンス中キャッシュ。削除時 invalidate）
+	async _roomImgCount(rid) {
+		this._cntC = this._cntC || new Map();
+		if (this._cntC.has(rid)) return this._cntC.get(rid);
+		const hs = await this._roomHs(rid);
+		// 枚数=manifest 件数。10 万件規模で全件 isEf は実行不能（ホーム起動ハング: 教訓 §48）なので先頭 3 件の実在のみ安否確認
+		let n = hs.size,
+			seen = 0,
+			k = 0;
+		for (const h of hs) {
+			if (await OPFS.isEf(HashStore.bp(h))) {
+				seen = 1;
+				break;
+			}
+			if (++k >= 3) break; // 本体全消失の古い manifest は 0 枚扱い
+		}
+		if (n && !seen) n = 0;
+		this._cntC.set(rid, n);
+		return n;
+	}
+	// 部屋完全消去: セッション dispose → 孤児本体+メタ物理削除 → rooms/<rid> 再帰削除 → 鍵/クレーム/タグ台帳/設定除去
+	async _purgeRoom(rid) {
+		if (!rid) return;
+		if (this.rooms.has(rid)) this.disposeRoom(rid); // §12: 開いている部屋は先にセッション終端
+		const ls = await this.roomList(),
+			other = new Set(); // コンテンツアドレスは部屋間で共有されうる: 他部屋マニフェスト参照の本体は残す
+		for (const it of ls) if (it.rid !== rid) for (const h of await this._roomHs(it.rid)) other.add(h);
+		const hs = await this._roomHs(rid),
+			orphans = new Set([...hs].filter(h => !other.has(h))); // 孤児のみ物理削除（本体も meta も部屋間で共有されうる）
+		for (const h of orphans) await OPFS.rmf(HashStore.bp(h)).catch(e => ef(e, 'room_app.purgeBody'));
+		await this.store.delMetas(orphans).catch(e => ef(e, 'room_app.purgeMetas'));
+		try {
+			const rh = await OPFS.gDH(rid, await OPFS.gDHR('rooms', false)); // gDH(名前, 親ハンドル): 作成しない
+			if (rh) await rh.remove({ recursive: true }); // 直下（room.json/manifest/sheet/...）一括
+		} catch (e) {
+			ef(e, 'room_app.purgeDir');
+		}
+		for (const p of ['keys/' + rid + '.json', 'claim/' + rid + '.json', 'tagreg/' + rid + '.json']) await OPFS.rmf(p).catch(() => {}); // v2.20 §47 の部屋単位ファイルも
+		for (const k of ['roomLogin.' + rid, 'MODE.' + rid, 'lj.' + rid]) AppSettings.setState(k, null).catch(() => {});
+		this._cntC = this._cntC || new Map();
+		this._cntC.delete(rid);
+		this.usageDirty();
+		await this.home();
+	}
 	async roomList() {
 		const out = [];
 		if (!this.opfsOk) return out;
@@ -322,10 +518,13 @@ export class RoomApp {
 		}
 		this.renderTabs();
 		Vw.add(this.main, 'h3').textContent = t('lbl.room.list');
-		const list = await this.roomList();
+		const list = await this.roomList(),
+			ljs = (AppSettings.state && AppSettings.state.lj) || {}; // v2.21 §48: 最終参加日の降順
+		list.sort((a, b) => (ljs[b.rid] || 0) - (ljs[a.rid] || 0));
 		for (const { rid, room } of list) {
 			const c = Vw.div(this.main, { class: 'ir-crd' });
 			Vw.add(c, 'b').textContent = RoomApp.unB64(room.nm) || room.nm || rid;
+			Vw.add(c, 'span', { class: 'ir-mut ir-lj' }).textContent = ljs[rid] ? RoomApp.ljFmt(ljs[rid]) : '—'; // yyyy-mm-dd-hh-mm（ローカル TZ）
 			Vw.add(c, 'span', { class: 'ir-mut' }).textContent = rid;
 			const rl = (AppSettings.state && AppSettings.state.roomLogin || {})[rid];
 			if (this.rooms.has(rid)) {
@@ -343,6 +542,15 @@ export class RoomApp {
 				Vw.click(b, () => this.loginForm(rid, room));
 			}
 			if (room.conflict) Vw.add(c, 'span', { class: 'ir-mut' }).textContent = t('msg.conflict.blocked'); // §6.9
+			// v2.21 §48: OPFS に実在する画像枚数と削除（本体+メタの物理削除。他部屋が参照する同一コンテンツ本体は残す）
+			const nimg = await this._roomImgCount(rid);
+			if (nimg > 0) Vw.add(c, 'span', { class: 'ir-mut ir-nimg' }).textContent = t('lbl.room.imgs', { n: nimg });
+			const bd = Vw.btn(c, { class: 'ir-btn warn ir-rdel' });
+			Vw.sT(bd, t('btn.room.del'));
+			Vw.click(bd, () => {
+				if (!window.confirm(t('msg.room.del'))) return;
+				this._purgeRoom(rid).catch(e => ef(e, 'room_app.purge'));
+			});
 		}
 		const row = Vw.div(this.main, { class: 'ir-row' });
 		const bc = Vw.btn(row, { class: 'ir-btn' });
@@ -375,6 +583,19 @@ export class RoomApp {
 		if (rl) uidIn.value = rl.uid || '';
 		const pwIn = Vw.ipt(f, { type: 'password', name: 'ir-pw', placeholder: t('lbl.password'), autocomplete: 'current-password' }); // v2.15 §42
 		Vw.add(f, 'div', { class: 'ir-mut' }).textContent = t('diag.origin') + ': ' + location.origin; // v2.8 §34: 参加側のオリジン表示（作成者に oa 登録してもらうため）
+		{ // v2.20 §47: URL/QR アンカーの作成者クレームをログイン画面で検証して表示（一致なら作成者名が分かる）
+			const ac = RoomApp.hashClaim();
+			if (ac) {
+				const rowCr = Vw.add(f, 'div', { class: 'ir-mut ir-crinfo' });
+				const nmP = RoomApp.unB64((room && room.nm) || preNb || '') || RoomApp.unB64(RoomApp.hashName()) || '';
+				rowCr.textContent = t('lbl.cr') + ' …';
+				this._crVerify(ac, nmP).then(v => {
+					rowCr.textContent = t('lbl.cr') + ' ' + (v.cr || '?') + ' ' + (v.ok ? t('lbl.cr.ok') : t('lbl.cr.bad'));
+					rowCr.classList.toggle('ok', !!v.ok);
+					rowCr.classList.toggle('bad', !v.ok);
+				});
+			}
+		}
 		// モード選択（サーバーはログイン時のみ、srvOn=false 部屋では disabled、§5.1/§5.7/§6.8）
 		Vw.add(f, 'label').textContent = t('lbl.mode');
 		const mr = Vw.div(f, { class: 'ir-row' });
@@ -694,6 +915,12 @@ export class RoomApp {
 		const seed = await AuthChallenge.seed(pw, nb, salt, this.cfg.HASH_ROUNDS); // v2.11 §38: origin 無し
 		const room = { rid, nm: nb, pw: seed, pwSalt: salt, srvOn: false, cr: uid, cg: Date.now(), xorig: !!xorig, oa: [], mx: +mx || 0 };
 		await OPFS.w(STORAGE.roomFile(rid), Y.s2u(JSON.stringify(room)).buffer);
+		try { // v2.20 §47: 部屋単位の鍵組と署名を OPFS に作成（クレームは QR/URL アンカーで配布）
+			await this._crKeys(rid, nmRaw, uid, room.cg);
+		} catch (e) {
+			ef(e, 'room_app.crKeys');
+			Toast(t('msg.cr.keyfail'));
+		}
 		const ctx = await this.openRoom({ rid, nb, room, uid, mode: 'normal' });
 		ctx.plainPw = pw; // QR 表示用（平文はセッション中のみ保持）
 		location.hash = encodeURIComponent(nb);
@@ -851,6 +1078,8 @@ export class RoomApp {
 				rid, nb, uid, mode, title: RoomApp.unB64((room && room.nm) || nb) || rid, plainPw: '',
 				room: Object.assign({ nm: nb, pw: '', pwSalt: '', srvOn: false, cr: '', cg: 0, xorig: false, oa: [], mx: 0 }, room || {}),
 			};
+			// v2.21 §48: 最終参加時刻（ローカル表示用。ログアウトでも保持）
+		AppSettings.setState('lj.' + rid, Date.now()).catch(e => ef(e, 'room_app.lj'));
 		// send は session 経由（ミラーは BC 委譲、§9.12）。生成順循環回避の遅延バインド
 		ctx.transfer = new FileTransfer({ send: s => (ctx.session ? ctx.session.sendFrame(s) : false), cfg, uid, gHoldMs: mode === 'server' ? (cfg.SRV_G_HOLD_MS || 10000) : (cfg.G_HOLD_MS || 30000) });
 		// Q 応答側: 本体差し出し（§9.3。コンテンツアドレス故に保持していれば供給。nf=null）
@@ -882,6 +1111,7 @@ export class RoomApp {
 			if (ctx.foot) Vw.sT(ctx.foot, t('lbl.sync.footer', { total: s.total, fetched: s.fetched }));
 		};
 		ctx.sync.start();
+		await this._creatorFlow(ctx).catch(e => ef(e, 'room_app.creatorFlow')); // v2.20 §47: 作成者クレーム検証/鍵自認（全参加経路共通）
 		ctx.slices = new SliceCache(mode === 'server' ? (cfg.SRV_SCACHE_MAX || 8) : (cfg.SCACHE_MAX || 64));
 		// ---- session フック（契約外・lead 結合設計: hooks 公開プロパティ）----
 		ctx.session.hooks = {
@@ -1078,6 +1308,7 @@ export class RoomApp {
 		const pr = Vw.div(this.main, { class: 'ir-parts' });
 		Vw.add(pr, 'span', { class: 'ir-parts-lbl' }).textContent = t('lbl.participants');
 		ctx.partsEl = Vw.div(pr, { class: 'ir-row' });
+		this.paintCr(ctx); // v2.20 §47: 作成者表示（クレーム検証済み/自機署名一致）
 		ctx.paintParts = list => {
 			Vw.rc(ctx.partsEl);
 			const ps = (list || ctx.session.state.participants || []).slice().sort((a, b) => (a.t || 0) - (b.t || 0));
@@ -1206,6 +1437,7 @@ export class RoomApp {
 		const calHost = Vw.div(zone, {});
 		if (!ctx.cal) {
 			ctx.cal = new RoomCalendar({ parent: calHost, cfg: this.cfg, collection: ctx.collection, slices: { slicesOf: (u, i) => ctx.sheet.slicesOf(u, i) }, transfer: ctx.transfer, img: { bodyOf: h10 => this.bodyOf(h10) }, keep: ctx.mode === 'keep', afterBody: (h10, ab) => this.keepAdopt(ctx, h10, ab) });
+			ctx.cal.online = () => { const s = ctx.session && ctx.session.state; return !!(s && s.online && s.authed); }; // v2.21 §48: 接続断で fetch 禁止（表示は OPFS 実在分のみ）
 			ctx.cal.sc.max = ctx.mode === 'server' ? (this.cfg.SRV_SCACHE_MAX || 8) : (this.cfg.SCACHE_MAX || 64); // サーバーモード低メモリ化 v1.3
 			ctx.cal.onBody = (h10, blob) => this.viewer(h10, blob); // §5.4 ビューア橋渡し
 			ctx.cal.setMode(this.cfg.CAL_VIEW || 'month');
@@ -1850,7 +2082,8 @@ export class RoomApp {
 			const ws = wsNorm(getWsBase()) || getWsBase(); // 既定でも実効値を常に同梱（http→ws 正規化、§28 と同じ wsNorm）
 			b64 = ws ? Y.B2U(Y.u2B(Y.s2u(ws))) : '';
 		} catch (e) { /* ef(e, 'room_app.roomUrl'); */ }
-		return `${base}#${encodeURIComponent(ctx.nb)}${b64 ? ':' + b64 : ''}`;
+		const cl = this._claimFor(ctx); // v2.20 §47: 3 節目に作成者クレーム（旧クライアントは ws 部以後を無視するため後方互換）
+		return `${base}#${encodeURIComponent(ctx.nb)}${b64 || cl ? ':' + (b64 || '') : ''}${cl ? ':' + cl : ''}`;
 	}
 	async qrInto(host, text, { size, file, note, secret } = {}) {
 		Vw.rc(host);
@@ -1910,7 +2143,7 @@ export class RoomApp {
 				return;
 			}
 			// 秘密鍵色系の独立エリア（URL QR とは明確に区別、追加仕様 v1.2）
-			this.qrInto(sec, qrPack(ctx.nb, ctx.plainPw), {
+			this.qrInto(sec, qrPack(ctx.nb, ctx.plainPw, this._claimFor(ctx)), {
 				file: ctx.rid + '.pw.png',
 				secret: true,
 				note: t('lbl.qr.secret') + ' ' + t('lbl.qr.scan.pw'),
@@ -1951,7 +2184,7 @@ export class RoomApp {
 				draw();
 			});
 			if (cb.checked && ctx.plainPw) {
-				this.qrInto(Vw.div(sec, {}), qrPack(ctx.nb, ctx.plainPw), {
+				this.qrInto(Vw.div(sec, {}), qrPack(ctx.nb, ctx.plainPw, this._claimFor(ctx)), {
 					size: 160,
 					file: ctx.rid + '.pw.png',
 					secret: true,
@@ -1975,7 +2208,7 @@ export class RoomApp {
 				this.pwCopyRow(qrBox, ctx); // v2.12 §39: 未発行でもボタンは QR 直下に無効表示
 				return;
 			}
-			this.qrInto(qrBox, qrPack(ctx.nb, ctx.plainPw), { file: ctx.rid + '.png', secret: true, note: t('lbl.qr.secret') });
+			this.qrInto(qrBox, qrPack(ctx.nb, ctx.plainPw, this._claimFor(ctx)), { file: ctx.rid + '.png', secret: true, note: t('lbl.qr.secret') });
 			this.pwCopyRow(qrBox, ctx); // v2.12 §39: QR の直下（発行で再生成され有効化）
 		};
 		// パスワード再発行（新 seed 算出 → C 送出、§6.3/§8.3）

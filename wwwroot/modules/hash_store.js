@@ -126,6 +126,39 @@ export class HashStore {
 			.filter(m => m && RE_H.test(m.h) && m.d)
 			.sort((a, b) => b.d - a.d);
 	}
+	// v2.21 §48: 指定 h10 の meta 行を物理削除（day jsonl 書換 + legacy ファイル除去 + mmap）
+	async delMetas(hs) {
+		const set = hs instanceof Set ? hs : new Set(hs || []);
+		if (!set.size) return;
+		for (const h of set) this._mmap.delete(h);
+		try {
+			for (const f of await OPFS.ls('meta')) {
+				if (!f || f.s === undefined) continue;
+				const k = String(f.k).split('/').pop();
+				if (!/^d\d+\.jsonl$/.test(k)) continue;
+				const p = 'meta' + P + k,
+					keep = [];
+				for (const line of Y.u2s(await OPFS.r(p)).split('\n')) {
+					if (!line) continue;
+					let m;
+					try {
+						m = JSON.parse(line);
+					} catch (e) {
+						continue;
+					}
+					if (m && set.has(m.h)) continue;
+					keep.push(line);
+				}
+				if (keep.length) await OPFS.w(p, Y.s2u(keep.join('\n') + '\n'));
+				else await OPFS.rmf(p);
+			}
+		} catch (e) { /* meta 直下が無ければ何もしない */ }
+		for (const h of set) {
+			try {
+				if (await OPFS.isEf(HashStore.mp(h))) await OPFS.rmf(HashStore.mp(h));
+			} catch (e) { /* noop */ }
+		}
+	}
 	async sweep(nowMs, keepDays, extraRefs) {
 		await OPFS.rd;
 		// 順序: ①期限切れ meta 削除 → ②残 meta(+extraRefs)の参照集合構築 → ③孤児 bodies 削除

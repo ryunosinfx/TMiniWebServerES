@@ -847,3 +847,25 @@ input[type="file"]:active::file-selector-button {
 	flex-wrap: wrap;
 	gap: 4px;
 }
+
+/* v2.20 §47: 部屋作成者クレーム表示 */
+.ir-crinfo {
+	margin-left: 8px;
+	font-size: 0.85em;
+}
+.ir-crinfo.ok {
+	color: #4caf7d;
+}
+.ir-crinfo.bad {
+	color: #d7756a;
+	font-weight: 700;
+}
+
+/* v2.21 §48: ログイン画面の部屋カード（最終参加日/画像枚数/削除） */
+.ir-crd .ir-lj {
+	margin-left: 8px;
+}
+.ir-crd .ir-nimg {
+	margin-left: 8px;
+	color: #8aa2c8;
+}

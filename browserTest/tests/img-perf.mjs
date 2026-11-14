@@ -158,7 +158,14 @@ await snap('zip:after');
 		}, null, { timeout: 20000 });
 		if (await p.evaluate(() => !!window.__IRAPP.activeCtx()?.session?.state.authed)) return;
 		if (!(await p.$('input[name="ir-pw"]'))) {
-			await p.click('button:has-text("参加")');
+			// autoJoin 競合: 部屋ビュー切替後は認証完了を待つ（参加ボタンは消えている）。高負荷時 20s まで
+			if (await p.evaluate(() => { const v = window.__IRAPP.view; return !!(v && v.t === 'room'); })) {
+				await p.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 20000 });
+				return;
+			}
+			await p.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 8000 }).catch(() => {});
+			if (await p.evaluate(() => !!window.__IRAPP.activeCtx()?.session?.state.authed)) return;
+			await p.click('button:has-text("参加")', { timeout: 8000 });
 			await p.waitForSelector('input[name="ir-pw"]', { timeout: 15000 });
 		}
 		await p.fill('input[name="ir-nm"]', ROOM);

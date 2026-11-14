@@ -376,6 +376,14 @@ export class RoomCalendar {
 					return b1;
 				}
 			}
+			if (this.online && !this.online()) { // v2.21 §48: 接続断 — 画像は OPFS 実在分のみ表示（転送経路に行かない。メッセージ表示は現状のまま）
+				if (this.img && typeof this.img.bodyOf === 'function') {
+					const bl = await this.img.bodyOf(h10);
+					if (bl) return bl;
+				}
+				if (!this.dead) Toast(I18N.t('msg.fetch.fail'));
+				return null;
+			}
 			const ho = this.col && typeof this.col.holdersOf === 'function' ? this.col.holdersOf(h10) : null;
 			if (ho && ho.allDeparted) { // 全保持者不参加: 取得不能（§5.5/§12）
 				if (!this.dead) Toast(I18N.t('msg.offline.gray'));

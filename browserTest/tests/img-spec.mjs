@@ -128,7 +128,7 @@ await A.click('.ir-mbx .ir-rw:has-text("同期") input[type=radio]'); // v2.2 §
 await A.waitForSelector('.ir-toast', { timeout: 5000 });
 await A.click('.ir-mclose');
 await A.click('button:has-text("ログアウト")');
-await A.waitForSelector('button:has-text("ログイン")', { timeout: 10000 });
+await A.waitForSelector('button:has-text("ログイン")', { timeout: 25000 }); // 連続ループ負荷で home 再描画が遅い環境向けに待機放宽（製品挙動は同一）
 await A.click('button:has-text("ログイン")');
 await A.waitForSelector('.ir-rd', { timeout: 5000 });
 const srvRadio = A.locator('.ir-rd:has-text("サーバー") input');
@@ -1077,7 +1077,7 @@ ck('hdrSwitchState', await B.evaluate(() => {
 // ---- v2.15 §42: URL アンカーの WebSocket 設定 / URL QR の ws 同梱 / サーバー pw QR オプション / パスワードマネージャ form ----
 ck('urlQrWs', await A.evaluate(async () => { // URL QR 実文に #nb:b64url(実効 WS base) が付く
 	const v = (document.querySelector('.ir-sec .ir-qrside input') || {}).value || '',
-		m = /#([A-Za-z0-9_%-]+):([A-Za-z0-9_-]+)$/.exec(v);
+		m = /#([A-Za-z0-9_%-]+):([A-Za-z0-9_-]+)(?::|$)/.exec(v); // v2.20 §47: 3 節目に作成者クレームが続くため $ 固定を除去
 	if (!m) return false;
 	const Y = (await import('/Y.js')).Y;
 	return Y.u2s(Y.U2u(m[2])) === location.origin.replace(/^http/, 'ws');
@@ -1424,6 +1424,150 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	await A.click('.ir-mclose');
 	await B.click('.ir-mclose');
 	await A.waitForTimeout(300);
+}
+// ---- v2.20 §47: 部屋作成者クレーム（OPFS 鍵組・署名検証・URL/QR アンカー・再署名一致認定） ----
+{
+	const crd = await A.evaluate(async () => {
+		const c = window.__IRAPP.activeCtx(),
+			{ OPFS } = await import('/OPFS.js');
+		return {
+			rid: c.rid,
+			keyFile: await OPFS.isEf('keys/' + c.rid + '.json'),
+			self: await window.__IRAPP._crSelfCheck(c),
+			url: window.__IRAPP.roomUrl(c),
+			info: c._crInfo && { ok: c._crInfo.ok, cr: c._crInfo.cr, self: c._crInfo.self },
+			badge: document.querySelector('.ir-parts .ir-crinfo')?.textContent || '',
+		};
+	});
+	ck('crKeyFile', crd.keyFile); // 作成時に鍵組+署名が OPFS keys/<rid>.json へ保存
+	ck('crSelfMatch', crd.self === true); // 署名再作成→公開鍵検証一致で作成者認定
+	ck('crInfoSelf', !!(crd.info && crd.info.ok && crd.info.self && crd.info.cr === 'PONTA'));
+	ck('crBadgeHdr', crd.badge.includes('PONTA') && crd.badge.includes('署名一致'));
+	const seg = crd.url.split('#')[1].split(':');
+	ck('crUrlClaim', seg.length === 3 && /^[0-9]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(seg[2]));
+	ck('crAnchorVerify', await A.evaluate(async cl => { // 第三者検証: nm(平文)+uid+ct の JSON ダイジェスト署名を公開鍵で検証
+		const c = cl.split('.'),
+			b64 = x => Uint8Array.from(atob(x.replace(/-/g, '+').replace(/_/g, '/')), y => y.charCodeAt(0)),
+			pub = await crypto.subtle.importKey('spki', b64(c[2]), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
+			json = JSON.stringify({ nm: atob(String(decodeURIComponent(location.hash.slice(1)).split(':')[0]).replace(/-/g, '+').replace(/_/g, '/')), uid: atob(c[1].replace(/-/g, '+').replace(/_/g, '/')), ct: +c[0] });
+		return crypto.subtle.verify({ name: 'ECDSA', hash: { name: 'SHA-256' } }, pub, b64(c[3]), new TextEncoder().encode(json));
+	}, seg[2]));
+	// 正しいクレームで呼んだ新規端末: ログイン画面で作成者が検証表示
+	const B4 = await mk('CR4');
+	await B4.goto(BASE + '/img_room.html#' + seg[0] + ':' + seg[1] + ':' + seg[2]);
+	await B4.waitForSelector('.ir-crinfo', { timeout: 10000 });
+	ck('crBadgeJoin', (await B4.locator('.ir-crinfo').textContent()).includes('PONTA') && (await B4.locator('.ir-crinfo').textContent()).includes('署名一致'));
+	// 改竄クレーム: 不一致表示
+	const B5 = await mk('CR5');
+	await B5.goto(BASE + '/img_room.html#' + seg[0] + ':' + seg[1] + ':' + seg[2].slice(0, -8) + 'AAAAAAAA');
+	await B5.waitForSelector('.ir-crinfo', { timeout: 10000 });
+	ck('crBadgeTamper', (await B5.locator('.ir-crinfo').textContent()).includes('署名不一致'));
+	await B5.close();
+	// パスワード QR のパックにクレーム同梱（# 区切り）
+	await A.waitForSelector('button[aria-label="部屋設定"]', { timeout: 10000 });
+	await A.click('button[aria-label="部屋設定"]');
+	await A.waitForSelector('.ir-mbx .ir-qrside input', { timeout: 10000 });
+	const packv = await A.locator('.ir-mbx .ir-qrside input').first().inputValue();
+	ck('crPackClaim', packv.startsWith('TMIWR1:') && packv.includes('#' + seg[2]));
+	await A.click('.ir-mclose');
+	await B4.close();
+	await A.waitForTimeout(400);
+}
+// ---- v2.21 §48: 部屋一覧の削除/画像枚数/最終参加日 + 接続断で OPFS 画像のみ ----
+{
+	const D = await mk('DL1');
+	let dlMsg = '';
+	D.on('dialog', d => { dlMsg = d.message(); d.accept(); });
+	await D.goto(BASE + '/img_room.html');
+	await D.waitForSelector('button:has-text("部屋作成")', { timeout: 20000 });
+	const png = (tag) => D.evaluate(k => {
+		const c = document.createElement('canvas');
+		c.width = c.height = 48;
+		const g = c.getContext('2d');
+		g.fillStyle = '#39c';
+		g.fillRect(0, 0, 48, 48);
+		g.fillStyle = '#fff';
+		g.fillRect(k, 0, 3, 48); // 共有/孤児を分ける微量差分
+		return c.toDataURL('image/png').slice(22);
+	}, tag).then(b64 => ({ name: `dl${tag}.png`, mimeType: 'image/png', buffer: Buffer.from(b64, 'base64') }));
+	const createRoom = async nm => {
+		await D.click('button:has-text("部屋作成")');
+		await D.fill('input[name="ir-cn"]', nm);
+		await D.fill('input[name="ir-cuid"]', 'DLU');
+		await D.fill('input[name="ir-cpw"]', 'dl-pw');
+		await D.click('.ir-frm button:has-text("部屋作成")');
+		await D.waitForSelector('input[type=file]', { timeout: 20000 });
+		return await D.evaluate(() => window.__IRAPP.activeCtx().rid);
+	};
+	const RX = await createRoom('DLX' + Date.now().toString(36).slice(-4));
+	const imgA = await png(6);
+	await D.setInputFiles('input[type=file]', imgA); // 共有本体 (h 同一は byte 同一)
+	await D.waitForTimeout(900);
+	await D.click('button:has-text("ログアウト")');
+	const RY = await createRoom('DLY' + Date.now().toString(36).slice(-4));
+	await D.setInputFiles('input[type=file]', imgA); // 同じ bytes → 同一コンテンツアドレス
+	await D.waitForTimeout(900);
+	const hsY = await D.evaluate(async rid => [...await window.__IRAPP._roomHs(rid)], RY);
+	await D.click('button:has-text("ログアウト")');
+	await D.waitForTimeout(700);
+	// カード表示: 最終参加日(現在形式)/枚数/並び順
+	const cards = await D.evaluate(() => [...document.querySelectorAll('.ir-crd')].map(c => ({ t: c.textContent, del: !!c.querySelector('.ir-rdel') })));
+	ck('dlLj', cards[0].t.match(/\d{4}-\d{2}-\d{2}-\d{2}-\d{2}/) !== null, cards[0].t.slice(0, 40));
+	ck('dlCount', cards[0].t.includes('1 枚') && cards[1].t.includes('1 枚')); // RY(新)→RX(旧)… 降順
+	ck('dlOrder', cards[0].t.includes('DLY') && cards[1].t.includes('DLX'), JSON.stringify({ c0: cards[0].t.slice(0, 24), c1: cards[1].t.slice(0, 24), ljs: await D.evaluate(async () => { try { const { AppSettings } = await import('/modules/app_settings.js'); await AppSettings.load ? await AppSettings.load().catch(() => {}) : 0; return (AppSettings.state && AppSettings.state.lj) || null; } catch (e) { return 'ERR ' + e.message; } }) }));
+	ck('dlDelBtn', cards.every(c => c.del));
+	// 削除（共有本体は残す）
+	await D.locator('.ir-crd').first().locator('.ir-rdel').click();
+	await D.waitForTimeout(1200);
+	ck('dlConfirm', dlMsg.includes('永久に削除'), dlMsg);
+	const st1 = await D.evaluate(async arg => {
+		const { OPFS } = await import('/OPFS.js'),
+			app = window.__IRAPP;
+		return {
+			cards: document.querySelectorAll('.ir-crd').length,
+			roomJson: await OPFS.isEf('rooms/' + arg.ry + '/room.json'),
+			keys: await OPFS.isEf('keys/' + arg.ry + '.json'),
+			bodyKept: await OPFS.isEf('bodies/' + arg.h),
+			metaKept: !!(await app.store.metaGet(arg.h)),
+		};
+	}, { ry: RY, h: hsY[0] });
+	ck('dlGone', st1.cards === 1 && !st1.roomJson && !st1.keys);
+	ck('dlSharedKept', st1.bodyKept && st1.metaKept); // 他部屋参照のコンテンツは不削除
+	// 接続断: 画像は OPFS 実在分のみ（転送しない/即時）
+	await D.locator('.ir-crd').first().locator('.ir-btn:not(.ir-rdel)').click();
+	await D.waitForSelector('input[name="ir-uid"]', { timeout: 20000 });
+	await D.fill('input[name="ir-uid"]', 'DLU');
+	await D.fill('input[name="ir-pw"]', 'dl-pw');
+	await D.click('.ir-frm button:has-text("ログイン")');
+	await D.waitForSelector('input[type=file]', { timeout: 20000 });
+	const off = await D.evaluate(async () => {
+		const c = window.__IRAPP.activeCtx(),
+			hOwn = c.collection.roomItems().find(x => x.mine).h10;
+		c.session._st.online = false;
+		c.session._st.authed = false;
+		const t0 = Date.now(),
+			b = await c.cal.fetchBody(hOwn),
+			ms1 = Date.now() - t0,
+			t1 = Date.now(),
+			m = await c.cal.fetchBody('nonexistent0000000000000000000000'),
+			ms2 = Date.now() - t1;
+		return { got: !!b, ms1, missNull: m === null, ms2 };
+	});
+	ck('dlOffLocal', off.got && off.ms1 < 2000, JSON.stringify(off));
+	ck('dlOffNoNet', off.missNull && off.ms2 < 2000, JSON.stringify(off)); // REQ_TIMEOUT に掛からない
+	// 孤児削除: RX を消すと本体も meta も物理削除
+	await D.click('button:has-text("ログアウト")');
+	await D.waitForTimeout(600);
+	await D.locator('.ir-crd').first().locator('.ir-rdel').click();
+	await D.waitForTimeout(1200);
+	const st2 = await D.evaluate(async arg => {
+		const { OPFS } = await import('/OPFS.js'),
+			app = window.__IRAPP;
+		return { cards: document.querySelectorAll('.ir-crd').length, body: await OPFS.isEf('bodies/' + arg.h), meta: !!(await app.store.metaGet(arg.h)) };
+	}, { h: hsY[0] });
+	ck('dlOrphanGone', st2.cards === 0 && !st2.body && !st2.meta);
+	await D.close();
+	await A.waitForTimeout(400);
 }
 await N9.close();
 await K1.close();

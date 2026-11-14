@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.19
+- ステータス: ドラフト v2.21
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1419,3 +1419,37 @@ ponta 側を**強制再読込**したうえで再試行するとコンソール�
 ### テスト（「SPEC OK」）
 - `tgOwnItem`/`tgInputShown`/`tgChip`/`tgMeta`/`tgCloudRecent`（下段に即出現）/ `tgPropB`（M 強制周知で B の meta.tg に union）/ `tgRegK1`（announce→K1 の登録表に不足分追加）/ `tgRegFileK1`（K1 の OPFS `tagreg/<rid>.json` へ永続、`import('/OPFS.js')` の `OPFS.isEf/r` で照会）/ `tgChipB`,`tgSameItem`（B が同一画像で chips 確認）/ `tgNoDup`（クラウド再クリックで重複付与なし）/ `tgPropA`（B 編集→A へ逆伝播）/ `tgFilter10`（残り 22 候補の部分一致→10 個上限）。
 - 教訓: ①**サーバー機でも他成员投稿の本文は初回 P2P 取得で遅延/失敗し得る**ため、ビューア系テストは**自己所有項目**基準で開く（A の最新=.ir-thumb 先頭が他成员投稿で 20s 開かない事故）。②`Playwright で同一ブラウザの別ページは別 browser.newContext()` で初めて storage 分離（既定 newPage 共有だと StoreTX オーナー争いでミラーになり、OPFS 同一のため**伝播テストが全滅の偽陽性/偽陰性**になる—再現スクリプトは必ず context 分離）。
+
+## 47. 追加仕様 v2.20: 部屋作成者の鍵署名（作成者不明状態の解消・QR/URL アンカー配布）
+要求（2026-11-15）: 部屋作成者が誰かわからない状態が出る。作成者は**秘密鍵＆公開鍵ペアを OPFS に部屋単位で作成**し、**部屋名+自分の参加者名+作成時間(JS UNIXTIME) の JSON 文字列の SHA256 ハッシュへの署名**（BASE64URL）を、作成時間・作成者・公開鍵 BASE64URL とともに**パスワード QR コードの URL のアンカーに埋め込む**。画面側は它を認識して**データと署名の一致チェック**を行う。作成者認識は**署名を再作成して一致**したことで作成者とみなして作動させる。
+
+- **鍵とクレーム（`room_app._crKeys`）**: 部屋作成時に **ECDSA P-256/SHA-256** 鍵組を生成（WebCrypto の RSA generateKey は本実装環境で非対応—`RsaHashedKeyGenParams: hash` 誤解を招くエラーで失敗、ECDSA のみ可。教訓）。署名対象は `JSON.stringify({nm:部屋名平文, uid:参加者名, ct:room.cg})`（キー順固定で決定性）→ `SHA256withECDSA`。OPFS **`keys/<rid>.json`** に `{ver,json,ct,uid,claim,privJwk}` を保存。
+  - **クレーム文字列**（`ir_const.claimMake/claimParse`）: `<ct>.<crB64U>.<pkB64U>.<sgB64U>`（cr=参加者名の b64url(utf8)、pk=SPKI DER b64url、sg=署名 DER b64url。いずれも `.` を含まず安全）。
+- **URL アンカー拡張（§42 の後継格式・後方互換）**: `#<部屋名b64url>:<wsb64url>:<クレーム>`。`hashWs()` は 2 節目のみ採用（3 節目無視で旧客户端も動作）、`hashClaim()` で 3 節目を検証。`roomUrl()` はクレーム所持時のみ 3 節目を追加。
+- **パスワード QR**: `TMIWR1:<nm>:<pw>#<クレーム>`（pw は b64url で `#` を含まないため安全。`qrUnpack` は `#` 分離で `{nameB64U,pw,claim}` を返す。貼り付け除去 `pwFromField` は自動追随）。**URL QR/参加 URL にも同一クレーム**が載る。
+- **一致チェック（`_crVerify`）**: 部屋名平文（`#nm` 節の b64url 復号）+クレームの cr/ct から JSON を再構成し、pk（SPKI）で sg を ECDSA 検証。結果を**ログインフォーム**（`.ir-crinfo`「作成者: <uid> （署名一致）/（署名不一致）」）と**部屋ヘッダ参加者列**（`paintCr`）に表示。
+- **作成者認識=署名再作成一致（`_crSelfCheck`）**: 鍵所持端末は同じ JSON で**署名を再作成**し、元クレーム sg・新規署名とも公開鍵検証に通ることで**鍵の所持=作成者本人**と認定（ECDSA は署名が非決定的なため**検証一致**で判定、バイト同一比較はしない）。認定時は self タグ表示、`room.cr` が空/不一致でも**自 UID で補完**して作成者機能（§5.3 メニュー・§6.8 モード切替・§8.3 C 再配信、`room.cr === uid` ゲート全経路）を作動させる。
+- **作成者不明状態の救済**: クレーム検証成功時、`room.cr` が空ならクレームの cr で補完（参加者側でも作成者名が復元される）。鍵所持端末は QR/URL を経由しなくても `keys/<rid>.json` からクレームを復元（authOk 時の C 再配信 L994 で部屋全体へ周知）。受け取ったアンカー クレームは **`claim/<rid>.json`** に保存し、次回以降のアンカーなし参加でも認識表示に使う。
+- 検証/表示は全参加経路共通で `openRoom` 末尾の `_creatorFlow`（作成・ログイン・rejoin・autoJoin）。
+
+### テスト（「SPEC OK」）
+- `crKeyFile`（keys/<rid>.json 実在）/ `crSelfMatch`（再署名一致認定）/ `crInfoSelf`（ctx._crInfo ok+self・cr=PONTA）/ `crBadgeHdr`（ヘッダ表示）/ `crUrlClaim`（3 節目クレーム書式）/ `crAnchorVerify`（ページ内 WebCrypto で第三者検証 true）/ `crBadgeJoin`（新規端末が正しい URL で「PONTA （署名一致）」）/ `crBadgeTamper`（sg 改竄で「署名不一致」）/ `crPackClaim`（パスワード QR が `TMIWR1:…#<クレーム>`）。
+- 既存 §42 `urlQrWs` はアンカー末尾 `$` 固定正規表現を `(?::|$)` へ修正（後方互換の実証）。
+- 付随（img-perf1024）: 1024 件月ビューの `monthImgs` がシート再生成ウェーブで旧 DOM 残留 true により早期解決→imgs=0 化（v2.20 の作成時鍵生成で相位がずれ顕在化）。再待機条件を **`sheet.index.size>0` かつ imgs≥5** に強化（再構築中の空索引窓を待たない）。
+
+## 48. 追加仕様 v2.21: 部屋一覧の削除/画像枚数/最終参加日 + 接続断での OPFS 画像表示
+要求（2026-11-15）: ログイン画面の登録済み部屋一覧に (a) 削除ボタン（OPFS に画像がある場合は枚数表示、「永久に削除しますがよいですか？」確認、OK で画像+メタデータ物理削除）、(b) 部屋名の横に最終参加日 `yyyy-mm-dd-hh-mm`（ローカル TZ）、最終参加時刻の降順並べ替え、(c) 部屋に入り接続出来なくてもメッセージは現状のまま、画像は OPFS 実在分のみ表示。
+
+- **最終参加日**: `openRoom`（作成/参加/rejoin/autoJoin 全経路）で `AppSettings.setState('lj.'+rid, Date.now())`。ログアウトでも保持（`roomLogin` とは別キー）。home は `state.lj` で降順ソートし、部屋名 `b` の横に `RoomApp.ljFmt`（`yyyy-mm-dd-hh-mm`、ローカルタイムゾーン）。
+- **画像枚数**: `home()` が `_roomImgCount(rid)` — 部屋直下 `manifest.<uid>.jsonl`（x 除去 last-wins、legacy .json も）の h10 集合（`_roomHs`）の**件数**（インスタンス中キャッシュ、削除時 invalidate）。0 枚は非表示。**全件 `isEf` 実在確認は 10 万件規模でハングするため禁止**（先頭 3 件だけ安否確認し全消失なら 0 枚扱い。scale/mobile の SYNTH 100k で実証）。
+- **削除**: カードの `.ir-rdel`（warn 色）→ `window.confirm(t('msg.room.del')=「永久に削除しますがよいですか？」)` → `_purgeRoom(rid)`:
+  1. 開いている部屋は `disposeRoom` でセッション終端
+  2. **孤児のみ物理削除**: 他部屋の全 manifest h10 集合 `other` を作り、`hs − other` の本体 `bodies/<h>` を `OPFS.rmf`、meta は `HashStore.delMetas(孤児Set)`（`meta/d<day>.jsonl` 該当行除去で書換、空ならファイル削除、legacy `meta/<h>.json` も除去、`_mmap` 同期）。**コンテンツアドレスは部屋間で共有されうるため共有本体/共有 meta は残す**（v1.5 §19 不変）。
+  3. `rooms/<rid>/` 直下を `dh.remove({recursive:true})`（room.json/manifest/sheet 群/history/autodl 一括）
+  4. v2.20 §47 の部屋単位ファイル `keys/claim/tagreg/<rid>.json` も削除
+  5. 設定 `roomLogin/MODE/lj.<rid>` 除去、枚数キャッシュ invalidate、`usageDirty`+再描画
+- **接続断（offline）画像 policy**: `RoomCalendar.fetchBody` 冒頭（keep 優先の次）に `this.online && !this.online()` ゲート（`ctx.cal.online = () => session.state.online && authed`）。接続断では **転送経路に入らず** OPFS ローカル（`img.bodyOf`）のみ。実在なら表示、無ければ現状どおりメッセージ（`msg.fetch.fail` Toast）のみで即 null（REQ_TIMEOUT を待たない）。
+- 教訓: ① `OPFS.gDH(名前, 親ハンドル, opts)` の引数順（`gDH('rooms', rid)` は誤用。`gDHR('rooms', false)`+`gDH(rid, parent)` が非作成取得）。② OPFS.js の `F/T` 定数はモジュール内で room_app には見えない→`false` 直書き。③ 削除は meta も共有前提で孤児のみ（部屋横断の同一コンテンツ）。④ ホームの枚数算出で全件 isEf を走らせると SYNTH 10 万件テスト（img-scale/img-mobile）の再起動経路が 30s 待機に間に合わず全滅—**OPFS 逐個 isEf は百件オーダーまで**の原則。
+
+### テスト（「SPEC OK」）
+- `dlLj`（カードに yyyy-mm-dd-hh-mm）/ `dlCount`（両カード「1 枚」）/ `dlOrder`（最終参加日の降順: 新→旧）/ `dlDelBtn`（削除ボタン）/ `dlConfirm`（確認文「永久に削除」）/ `dlGone`（カード消去+room.json+keys 消滅）/ `dlSharedKept`（別部屋と同一 bytes=共有本体・meta は残存）/ `dlOffLocal`（`_st.online=false` でも自 OPFS 画像は <2s で取得）/ `dlOffNoNet`（未保持は <2s で null—転送待ちは発生しない）/ `dlOrphanGone`（参照ゼロで本体・meta とも物理消滅、カード 0）。

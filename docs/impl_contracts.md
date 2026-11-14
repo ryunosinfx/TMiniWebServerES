@@ -275,6 +275,13 @@ new RoomApp() .boot() // window.onload から呼ぶ
 //   （{tags:[{t,last,n}]}500 件）。同期フレーム ir='g'（**ir は 1 文字規約**・q 照会/reg 一括・加算マージ・to 宛のみ処理）。
 //   ビューア .ir-tgrow/.ir-tgin/.ir-tgadd とクラウド 2 行（.ir-tgrecent=直近 10、.ir-tgfilt=残り×部分一致 10 上限）。
 //   タグ変更はシート差分に出ないので broadcastMNow() 強制周知。
+//   v2.20 §47: 作成者鍵=ECDSA P-256/SHA-256（RSA generateKey は本環境非対応）。OPFS keys/<rid>.json（{json,ct,uid,claim,privJwk}）。
+//   クレーム `<ct>.<crB64U>.<pkB64U(spkider)>.<sgB64U>`。URL=#nm:ws:claim（hashWs は 2 節目のみ）、pwQR=TMIWR1:nm:pw#claim。
+//   _crVerify（SPKI で JSON ダイジェスト検証→.ir-crinfo 表示・room.cr 空なら補完）/_crSelfCheck（再署名→検証一致で本人認定・全 cr ゲート復旧）。
+//   openRoom 末尾 _creatorFlow 共通。保存 claim/<rid>.json。
+//   v2.21 §48: home カード=最終参加日(state.lj.<rid>, yyyy-mm-dd-hh-mm ローカルTZ)降順+枚数(_roomImgCount=manifest 件数、先頭3件だけ isEf 安否確認。全件 isEf は 10 万件でハング禁止)+削除。
+//   _purgeRoom: disposeRoom→孤児のみ bodies rmf+HashStore.delMetas(day jsonl 書換)→rooms/<rid> 再帰削除→keys/claim/tagreg→roomLogin/MODE/lj 除去。
+//   共有コンテンツ(同一 h)は他部屋 manifest 参照で温存。offline: cal.online ゲートで fetchBody は OPFS のみ(メッセージは現状維持)。
 //   v2.16 §43: viewer は .ir-navz 帯（左右 1/3）で全項目 ts 降順の前後切替（未保有は fetchBody、周回）、
 //   単クリック 300ms 遅延／連続クリックと中央 2 クリック（320ms 以内）で enterFs。←/→ は全画面でなくても navStep。
 ```

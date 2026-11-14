@@ -149,7 +149,10 @@ try {
 	ck('monthRender', false, 'img<5 in 60s');
 }
 // シート再生成(setItems 再描画)が走るため、snap 直前で img 再現を再待機（v1.5: cap で DOM 少量化→再描画後の再読込が相対的に目立つ）
-await p.waitForFunction(() => document.querySelectorAll('.ir-thumb img').length >= 5, null, { timeout: 90000 }).catch(() => {});
+await p.waitForFunction(() => {
+	const c = window.__IRAPP.activeCtx();
+	return ((c && c.sheet && c.sheet.index && c.sheet.index.size) || 0) > 0 && document.querySelectorAll('.ir-thumb img').length >= 5; // v2.20: 旧 DOM の残留 true で早期解決しないようシート索引確定を条件化（再構築ウェーブ競合対策）
+}, null, { timeout: 90000 }).catch(() => {})
 const monthRow = await snap('cal:month1024');
 // v1.5 §19: 日セル表示上限 CELL_CAP=12（DOM 定数化）。items 全件は inner 側で保持。
 ck('monthCapped', monthRow.items >= N && monthRow.mounts > 0 && monthRow.mounts <= 12 * 42, `mounts=${monthRow.mounts} items=${monthRow.items}`); // 月ページ=最大42セル×cap12
