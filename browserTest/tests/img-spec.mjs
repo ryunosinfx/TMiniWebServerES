@@ -23,9 +23,9 @@ const mk = async label => {
 };
 const A = await mk('A'), B = await mk('B');
 const checks = {};
-const ck = (k, v) => {
+const ck = (k, v, m) => {
 	checks[k] = !!v;
-	if (!checks[k]) console.log('CHECKFAIL ' + k);
+	if (!checks[k]) console.log('CHECKFAIL ' + k + (m !== undefined ? ' :: ' + (typeof m === 'string' ? m : JSON.stringify(m)) : ''));
 	return checks[k];
 };
 process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filter(k => !checks[k]).join(',') || 'none')); // クラッシュ時も判明分を必ず出す
@@ -1567,6 +1567,65 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	}, { h: hsY[0] });
 	ck('dlOrphanGone', st2.cards === 0 && !st2.body && !st2.meta);
 	await D.close();
+	await A.waitForTimeout(400);
+}
+// ---- v2.22 §49: ログイン画面モードボタン(等分/選択色/説明) + 記憶(localStorage)+ submit 単一入口 ----
+{
+	const G = await mk('LG1');
+	await G.goto(BASE + '/img_room.html');
+	const LGN = 'LG' + Date.now().toString(36).slice(-4);
+	await G.click('button:has-text("部屋作成")');
+	await G.fill('input[name="ir-cn"]', LGN);
+	await G.fill('input[name="ir-cuid"]', 'LGU');
+	await G.fill('input[name="ir-cpw"]', 'lg-pw');
+	await G.click('.ir-frm button:has-text("部屋作成")');
+	await G.waitForSelector('input[type=file]', { timeout: 20000 });
+	const lgtit = await G.evaluate(() => window.__IRAPP.activeCtx().title);
+	await G.click('button:has-text("ログアウト")');
+	await G.waitForTimeout(700);
+	await G.locator('button:has-text("参加")').last().click(); // home 最下行: 新規参加フォーム
+	await G.waitForSelector('.ir-modes', { timeout: 8000 });
+	const bbs = [];
+	for (let i = 0; i < 4; i++) bbs.push(await G.locator('.ir-modes .ir-rd').nth(i).boundingBox());
+	const fW = (await G.locator('form.ir-frm').boundingBox()).width;
+	ck('modeEqual', bbs.every(b => b && Math.abs(b.width - bbs[0].width) <= 2) && bbs.reduce((a2, b) => a2 + b.width, 0) >= fW * 0.95, JSON.stringify(bbs.map(b => b && b.width)));
+	ck('modeSelColor', await G.evaluate(() => {
+		const c = [...document.querySelectorAll('.ir-modes .ir-rd')].map(x => getComputedStyle(x).backgroundColor);
+		return c[0] !== c[1] && c[0] !== c[2]; // 選択(都度)だけ色違い
+	}));
+	ck('modeSayInit', (await G.locator('.ir-modesay').textContent()).includes('その都度'));
+	await G.click('.ir-modes label:has-text("保持")');
+	ck('modeSayKeep', (await G.locator('.ir-modesay').textContent()).includes('OPFS'));
+	ck('modeSelColor2', await G.evaluate(() => {
+		const c = [...document.querySelectorAll('.ir-modes .ir-rd')].map(x => getComputedStyle(x).backgroundColor);
+		return c[1] !== c[0] && c[1] !== c[2]; // 選択が保持に移り色も移動
+	}));
+	await G.evaluate(() => { window.__sf = 0; document.querySelector('form.ir-frm').addEventListener('submit', () => window.__sf++); }); // v2.22 §49: パスワードマネージャ検知の submit 単一入口
+	await G.check('input[name="ir-remember"]');
+	await G.fill('input[name="ir-nm"]', LGN);
+	await G.fill('input[name="ir-uid"]', 'LGU');
+	await G.fill('input[name="ir-pw"]', 'lg-pw');
+	await G.click('.ir-frm button:has-text("ログイン")');
+	await G.waitForSelector('input[type=file]', { timeout: 20000 });
+	ck('lgSubmitFired', await G.evaluate(() => window.__sf) === 1);
+	await G.waitForFunction(() => !!localStorage.getItem('imgroom.last.v1'), null, { timeout: 10000 }).catch(() => {}); // 保存は login 成功直後（ビュー描画より遅いことがある）
+	ck('lgSaved', (await G.evaluate(() => localStorage.getItem('imgroom.last.v1')) || '').includes('LGU'), JSON.stringify(await G.evaluate(() => ({ k: localStorage.getItem('imgroom.remember.v1'), l: localStorage.getItem('imgroom.last.v1'), sf: window.__sf }))));
+	await G.click('button:has-text("ログアウト")');
+	await G.waitForTimeout(700);
+	await G.locator('button:has-text("参加")').last().click();
+	await G.waitForSelector('.ir-modes', { timeout: 8000 });
+	ck('lgPrefill', (await G.inputValue('input[name="ir-nm"]')) === lgtit && (await G.inputValue('input[name="ir-uid"]')) === 'LGU');
+	ck('lgRemChecked', await G.isChecked('input[name="ir-remember"]'));
+	await G.uncheck('input[name="ir-remember"]');
+	await G.fill('input[name="ir-pw"]', 'lg-pw');
+	await G.click('.ir-frm button:has-text("ログイン")');
+	await G.waitForSelector('input[type=file]', { timeout: 20000 });
+	await G.click('button:has-text("ログアウト")');
+	await G.waitForTimeout(700);
+	await G.locator('button:has-text("参加")').last().click();
+	await G.waitForSelector('.ir-modes', { timeout: 8000 });
+	ck('lgOffCleared', (await G.inputValue('input[name="ir-nm"]')) === '' && (await G.inputValue('input[name="ir-uid"]')) === '' && (await G.evaluate(() => localStorage.getItem('imgroom.last.v1'))) === null);
+	await G.close();
 	await A.waitForTimeout(400);
 }
 await N9.close();

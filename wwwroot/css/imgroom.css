@@ -869,3 +869,46 @@ input[type="file"]:active::file-selector-button {
 	margin-left: 8px;
 	color: #8aa2c8;
 }
+
+/* v2.22 §49: ログイン画面モードボタン（画面等分・選択色）と記憶チェック */
+.ir-frm .ir-modes {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 6px;
+	width: 100%;
+}
+.ir-frm .ir-rd {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	padding: 8px 4px;
+	border: 1px solid #3a4a63;
+	border-radius: 8px;
+	background: #232c3d;
+	cursor: pointer;
+	text-align: center;
+	user-select: none;
+}
+.ir-frm .ir-rd:has(input:checked) {
+	background: #3f6fb8;
+	border-color: #7fb0f0;
+	color: #fff;
+	font-weight: 700;
+}
+.ir-frm .ir-rd:has(input:disabled) {
+	opacity: 0.45;
+	cursor: default;
+}
+.ir-frm .ir-modesay {
+	min-height: 2.2em;
+	margin: 6px 0 2px;
+	color: #9fb3d1;
+}
+.ir-frm .ir-remline {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 6px 0;
+	cursor: pointer;
+}

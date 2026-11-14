@@ -409,6 +409,24 @@ export class RoomApp {
 			z = n => String(n).padStart(2, '0');
 		return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + '-' + z(d.getHours()) + '-' + z(d.getMinutes());
 	}
+	// v2.22 §49: ログイン情報の記憶（localStorage。チェックボックスで ON/OFF）
+	static REM_KEY = 'imgroom.remember.v1';
+	static REM_LAST = 'imgroom.last.v1';
+	static rememberOn = () => {
+		try {
+			return localStorage.getItem(RoomApp.REM_KEY) === '1';
+		} catch (e) {
+			return false;
+		}
+	}
+	static lastLogin() {
+		try {
+			const o = JSON.parse(localStorage.getItem(RoomApp.REM_LAST) || 'null');
+			return o && typeof o === 'object' ? o : null;
+		} catch (e) {
+			return null;
+		}
+	}
 	// 部屋マニフェスト（manifest.<uid>.jsonl / legacy .json）に載る h10 集合
 	async _roomHs(rid) {
 		const out = new Set();
@@ -578,9 +596,17 @@ export class RoomApp {
 		const nmIn = Vw.ipt(f, { type: 'text', name: 'ir-nm', placeholder: t('lbl.room.name'), autocomplete: 'off' });
 		if (room && room.nm) nmIn.value = RoomApp.unB64(room.nm) || room.nm;
 		else if (preNb) nmIn.value = RoomApp.unB64(preNb);
+		else { // v2.22 §49: 記憶 ON なら最終参加の部屋名を初期値に
+			const ll = RoomApp.rememberOn() ? RoomApp.lastLogin() : null;
+			if (ll && ll.nm) nmIn.value = ll.nm;
+		}
 		const uidIn = Vw.ipt(f, { type: 'text', name: 'ir-uid', placeholder: t('lbl.username'), autocomplete: 'username' }); // v2.15 §42
 		const rl = rid && AppSettings.state && (AppSettings.state.roomLogin || {})[rid];
 		if (rl) uidIn.value = rl.uid || '';
+		else { // v2.22 §49: 記憶 ON なら最終ログイン名を初期値に（部屋固有のログイン情報が優先）
+			const ll = RoomApp.rememberOn() ? RoomApp.lastLogin() : null;
+			if (ll && ll.uid) uidIn.value = ll.uid;
+		}
 		const pwIn = Vw.ipt(f, { type: 'password', name: 'ir-pw', placeholder: t('lbl.password'), autocomplete: 'current-password' }); // v2.15 §42
 		Vw.add(f, 'div', { class: 'ir-mut' }).textContent = t('diag.origin') + ': ' + location.origin; // v2.8 §34: 参加側のオリジン表示（作成者に oa 登録してもらうため）
 		{ // v2.20 §47: URL/QR アンカーの作成者クレームをログイン画面で検証して表示（一致なら作成者名が分かる）
@@ -596,9 +622,25 @@ export class RoomApp {
 				});
 			}
 		}
+		// v2.22 §49: 最終参加の部屋名/ログイン名を localStorage に記憶する切替（ON でログイン成功時に保存し初期値へ）
+		{
+			const remLb = Vw.add(f, 'label', { class: 'ir-remline' }),
+				remIn = Vw.ipt(remLb, { type: 'checkbox', name: 'ir-remember' });
+			remIn.checked = RoomApp.rememberOn();
+			Vw.add(remLb, 'span').textContent = t('lbl.remember');
+			Vw.ael(remIn, 'change', () => {
+				try {
+					if (remIn.checked) localStorage.setItem(RoomApp.REM_KEY, '1');
+					else {
+						localStorage.removeItem(RoomApp.REM_KEY); // OFF にした時点で記憶も消す
+						localStorage.removeItem(RoomApp.REM_LAST);
+					}
+				} catch (e) { /* localStorage 不可の環境は無視 */ }
+			});
+		}
 		// モード選択（サーバーはログイン時のみ、srvOn=false 部屋では disabled、§5.1/§5.7/§6.8）
 		Vw.add(f, 'label').textContent = t('lbl.mode');
-		const mr = Vw.div(f, { class: 'ir-row' });
+		const mr = Vw.div(f, { class: 'ir-modes' }); // v2.22 §49: 画面等分のボタン列（CSS grid 4 分）
 		const modes = [['normal', 'mode.normal.fetch'], ['keep', 'mode.normal.keep'], ['sync', 'hdr.mode.sync'], ['server', 'hdr.mode.server']]; // v2.13 §40: keep 追加
 		const radios = {};
 		for (const [m, key] of modes) {
@@ -609,14 +651,25 @@ export class RoomApp {
 			radios[m] = r;
 			Vw.add(lb, 'span').textContent = t(key);
 		}
+		{ // v2.22 §49: 選択したモードの状況説明文をボタンの下に表示
+			const say = Vw.add(f, 'div', { class: 'ir-modesay ir-mut' }),
+				paintSay = () => {
+					const m = Object.keys(radios).find(x => radios[x].checked) || 'normal';
+					say.textContent = t('mode.say.' + m);
+					say.dataset.mode = m;
+				};
+			for (const m of Object.keys(radios)) Vw.ael(radios[m], 'change', paintSay);
+			paintSay();
+		}
 		const row = Vw.div(f, { class: 'ir-row' });
 		const go = Vw.btn(row, { class: 'ir-btn', type: 'button' }); // v2.15 §42: 全ボタン type=button + form submit で Enter 対応
 		Vw.sT(go, t('btn.login'));
 		Vw.ael(f, 'submit', e => {
 			e.preventDefault();
-			go.click();
+			doLogin(); // v2.22 §49: submit が単一入口（ボタン経由も requestSubmit で submit を発火→ブラウザのパスワードマネージャが保存検知）
 		});
-		Vw.click(go, () => {
+		Vw.click(go, () => f.requestSubmit());
+		const doLogin = () => { // (ボタン→requestSubmit→上記 submit→doLogin の順で必ず 1 回)
 			const nmRaw = nmIn.value.trim();
 			const nb = room && room.nm ? room.nm : (nmRaw ? RoomApp.nb(nmRaw) : '');
 			if (!nb) {
@@ -629,7 +682,7 @@ export class RoomApp {
 			}
 			const mode = Object.keys(radios).find(m => radios[m].checked) || 'normal';
 			this.tryLogin({ rid: rid || '', room, nb, uid: uidIn.value.trim(), pw: pwIn.value, mode, f });
-		});
+		}; // v2.22 §49: doLogin 関数化（submit 単一入口）
 		const sc = Vw.btn(row, { class: 'ir-btn', type: 'button' }); // QR スキャン（§5.4 カメラ→PNG→ペースト縮退）
 		Vw.sT(sc, t('btn.scan'));
 		Vw.click(sc, () => this.scanFlow(d => {
@@ -685,6 +738,11 @@ export class RoomApp {
 		} else {
 			AppSettings.setNested('MODE.' + rid, mode).catch(e => ef(e, 'room_app.mode'));
 			this.usageDirty();
+			if (RoomApp.rememberOn()) { // v2.22 §49: 記憶 ON のログイン成功で 部屋名+ログイン名 を localStorage へ
+				try {
+					localStorage.setItem(RoomApp.REM_LAST, JSON.stringify({ nm: RoomApp.unB64((room && room.nm) || nb) || RoomApp.unB64(nb) || '', uid }));
+				} catch (e) { /* localStorage 不可は無視 */ }
+			}
 		}
 	}
 	retryBox(ctx) {

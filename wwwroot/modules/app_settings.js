@@ -72,6 +72,12 @@ export class AppSettings { // 契約: init/cfg/state/set/setNested/setState/flus
 		if (!this.ops.has(name)) this.ops.set(name, []);
 		if (!this.waiters.has(name)) this.waiters.set(name, []);
 		this.ops.get(name).push([path, v]);
+		// v2.22 §49 修正: メモリキャッシュへ楽観即反映（debounce 500ms で home の lj 並べ替え等が古い値を見るレースを解消。
+		// doFlush はファイル再読込上に保留 ops を再適用するので整合性は保たれる）
+		const mem = name === U ? this._cfg : this._state;
+		if (mem) try {
+			this.setPath(mem, path, v);
+		} catch (e) { /* 壊れたパス指定は flush 時に従来どおり */ }
 		const p = new Promise((res, rej) => this.waiters.get(name).push({res, rej}));
 		if (this.timer.has(name)) clearTimeout(this.timer.get(name));
 		this.timer.set(name, setTimeout(() => {

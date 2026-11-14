@@ -282,6 +282,10 @@ new RoomApp() .boot() // window.onload から呼ぶ
 //   v2.21 §48: home カード=最終参加日(state.lj.<rid>, yyyy-mm-dd-hh-mm ローカルTZ)降順+枚数(_roomImgCount=manifest 件数、先頭3件だけ isEf 安否確認。全件 isEf は 10 万件でハング禁止)+削除。
 //   _purgeRoom: disposeRoom→孤児のみ bodies rmf+HashStore.delMetas(day jsonl 書換)→rooms/<rid> 再帰削除→keys/claim/tagreg→roomLogin/MODE/lj 除去。
 //   共有コンテンツ(同一 h)は他部屋 manifest 参照で温存。offline: cal.online ゲートで fetchBody は OPFS のみ(メッセージは現状維持)。
+//   v2.22 §49: loginForm モード行=.ir-modes(grid 4 等分,:has(input:checked) で選択色)+.ir-modesay(mode.say.<m>)。
+//   ir-remember チェック=localStorage imgroom.remember.v1('1')/imgroom.last.v1({nm,uid})。tryLogin 成功時に保存、loginForm 初期値は rl>記憶。
+//   ログイン提出は submit 単一入口(ボタン→requestSubmit→submit→doLogin。pw 保存検知)。ビュー出現<login 成功処理なので効果待ち waitForFunction 必須。
+//   AppSettings.queue はメモリ(_cfg/_state)へ setPath 即反映(楽観)+flush で ops 再適用。テスト ck() は 3 引数目=失敗時 dbg 出力。
 //   v2.16 §43: viewer は .ir-navz 帯（左右 1/3）で全項目 ts 降順の前後切替（未保有は fetchBody、周回）、
 //   単クリック 300ms 遅延／連続クリックと中央 2 クリック（320ms 以内）で enterFs。←/→ は全画面でなくても navStep。
 ```

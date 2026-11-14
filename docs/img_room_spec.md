@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.21
+- ステータス: ドラフト v2.22
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1453,3 +1453,19 @@ ponta 側を**強制再読込**したうえで再試行するとコンソール�
 
 ### テスト（「SPEC OK」）
 - `dlLj`（カードに yyyy-mm-dd-hh-mm）/ `dlCount`（両カード「1 枚」）/ `dlOrder`（最終参加日の降順: 新→旧）/ `dlDelBtn`（削除ボタン）/ `dlConfirm`（確認文「永久に削除」）/ `dlGone`（カード消去+room.json+keys 消滅）/ `dlSharedKept`（別部屋と同一 bytes=共有本体・meta は残存）/ `dlOffLocal`（`_st.online=false` でも自 OPFS 画像は <2s で取得）/ `dlOffNoNet`（未保持は <2s で null—転送待ちは発生しない）/ `dlOrphanGone`（参照ゼロで本体・meta とも物理消滅、カード 0）。
+
+## 49. 追加仕様 v2.22: ログイン画面モードボタンの等分/選択色/説明文 + ログイン情報の記憶
+要求（2026-11-15）: ログイン画面の各モードボタンを画面等分広く取り、選択中はボタン色を変える。下に選んだ場合の状況説明文を付ける。「最後にログインした部屋とログイン名を覚えておく」チェックを入れ、ON の場合は localStorage に保存して初期値に設定する。ログイン後はブラウザのパスワードマネージャがパスワードを保存するようにする。
+
+- **モードボタン**: `loginForm` のモード行を `.ir-modes`（CSS grid `repeat(4,1fr)`、フォーム幅 100%）へ変更。4 ボタン（通常（都度）/通常（保持）/同期/サーバー）が**等分**。`:has(input:checked)` で選択ボタンの背景をアクセント色へ（サーバーは srvOn 部屋のみ有効・disabled は 45% 濃度）。
+- **状況説明文**: ボタン直下に `.ir-modesay`。radio `change` で `mode.say.<m>`（normal=その都度取得・keep=OPFS 恒久保存でオフライン表示可・sync=インベントリをサーバー保存・server=サーバー保存部屋）を表示。
+- **ログイン情報の記憶**: `loginForm` にチェックボックス `ir-remember`（ラベル「最後にログインした部屋とログイン名を記憶する」）。
+  - ON/OFF は localStorage `imgroom.remember.v1`='1'。OFF にした瞬間に記憶 `imgroom.last.v1` も削除。
+  - **保存**: tryLogin 成功ブロックで ON なら `{nm: 部屋名平文, uid}` を `imgroom.last.v1` へ（openRoom の lj とは別に、localStorage 直接。ログアウトでも残る）。
+  - **初期値**: `loginForm` で部屋固有 `roomLogin[rid]` に優先して—名前欄は部屋指定/QR 経由が無ければ記憶 nm、UID 欄は rl が無ければ記憶 uid。チェックボックスは記憶 ON 状態で開く。
+- **パスワードマネージャ保存検知**: ログイン提出を **form submit 単一入口**に再編（`doLogin()` 関数化、ボタン → `form.requestSubmit()` → submit イベント → doLogin。Enter も同一経路）。§42 の実 form（`ir-uid` autocomplete=username / `ir-pw` autocomplete=current-password）と合わせ、Chromium がログインとして検知して保存ダイアログを出す。
+- **AppSettings 楽観即反映（根本修正）**: `queue()` は従来 500ms debounce の doFlush 時にのみメモリ（`_cfg/_state`）へ適用していたため、`home()` の lj 並べ替え等が**古い状態で描画されるレース**があった（dlOrder flake の正体）。queue 時点で `setPath(mem, path, v)` を即適用し、flush（read-modify-write）で保留 ops を再適用するのでファイル整合性は維持。他タブ更新は `listen/notify` 側の再読込で追いつく。
+- 教訓: 部屋ビュー描画（input[type=file] 出現）は **login 成功処理より早い**。成功時に書く値（localStorage 記憶等）をテスト検証するには `waitForSelector(file input)` だけでなく**効果そのものの waitForFunction**（`localStorage.getItem('imgroom.last.v1')` 等）で待つこと（全体ループの高負荷時に限り顕在化—lgSaved flake の原因）。
+
+### テスト（「SPEC OK」）
+- `modeEqual`（4 ボタン等幅・フォーム幅 95% 以上）/ `modeSelColor`・`modeSelColor2`（選択ボタンのみ背景違い、保持へ移動）/ `modeSayInit`・`modeSayKeep`（説明文案がモードで切替）/ `lgSubmitFired`（ログインボタンで submit 正確 1 回）/ `lgSaved`（記憶 ON ログインで imgroom.last.v1 に uid）/ `lgPrefill`・`lgRemChecked`（次回フォームに部屋名/UID 初期値、チェック継続）/ `lgOffCleared`（OFF で記憶・初期値とも消去）。
