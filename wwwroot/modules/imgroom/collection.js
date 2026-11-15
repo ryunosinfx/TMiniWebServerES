@@ -227,6 +227,22 @@ export class Collection {
 	}
 
 	// ---- 表示用(§5.5/§9.9 除外の Material。ts 降順) ----
+	// v2.24 §51: 表示エンリッチ（リスト列・タグバッジ用: ts/uid/nmP/tg をトップレベルに揃える）
+	viewEnrich(x) {
+		if (!x || !x.h10) return x;
+		const m = x.meta || this.metas.get(x.h10) || {};
+		return { ...x, ts: Number(m.ts) || Number(x.ts) || 0, uid: m.u || x.uid || '', nmP: Collection.nmPlain(m), tg: Array.isArray(m.tg) ? m.tg : (Array.isArray(x.tg) ? x.tg : []) };
+	}
+	static nmPlain(m) {
+		const u = String((m && (m.n || m.nm)) || '');
+		if (!u) return '';
+		try {
+			return Y.u2s(new Uint8Array(Y.B2a(Y.U2B(u))));
+		} catch (e) {
+			return '';
+		}
+	}
+
 	roomItems() {
 		const out = [];
 		for (const m of this.metas.values()) {

@@ -15,15 +15,23 @@ export class ImgProc {
 	 * @returns {Promise<ImageBitmap|HTMLImageElement>}
 	 */
 	static async load(blob) {
+		let b = blob;
+		if (!/^image\//.test(b.type || '')) { // v2.23 §50: FF は type 無し blob の createImageBitmap で失敗 → スニッフで補う
+			const ab0 = await b.arrayBuffer(),
+				m = ImgProc.sniff(ab0);
+			if (m) b = new Blob([ab0], { type: m });
+		}
 		try {
-			return await createImageBitmap(blob);
+			return await createImageBitmap(b);
 		} catch (e) {
-			return await new Promise((res, rej) => {
-				const url = URL.createObjectURL(blob);
-				const img = new Image();
-				img.onload = () => { URL.revokeObjectURL(url); res(img); };
-				img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('ImgProc.load: decode failed')); };
-				img.src = url;
+			return await new Promise((res, rej) => { // v2.23 §50: objectURL フォールバックは Firefox で CSP(img-src 'self' data:) に block される → data: URL でデコード（Y.a2B は共通 CSP 対応済み経路）
+				blob.arrayBuffer().then(ab => {
+					const url = 'data:' + (blob.type || 'image/png') + ';base64,' + Y.a2B(ab),
+						img = new Image();
+					img.onload = () => res(img);
+					img.onerror = () => rej(new Error('ImgProc.load: decode failed'));
+					img.src = url;
+				}, rej);
 			});
 		}
 	}
@@ -116,8 +124,18 @@ export class ImgProc {
 	}
 
 	/** ArrayBuffer → Blob（mime 既定 application/octet-stream）。 */
+	// v2.23 §50: マジックバイトで MIME を推定（Firefox は createImageBitmap/Image が型無しの octet-stream を strict に弾く）
+	static sniff(ab) {
+		const u = ab instanceof Uint8Array ? ab : new Uint8Array(ab, 0, Math.min(ab.byteLength, 16));
+		if (u.length > 8 && u[0] === 0x89 && u[1] === 0x50 && u[2] === 0x4e && u[3] === 0x47) return 'image/png';
+		if (u.length > 2 && u[0] === 0xff && u[1] === 0xd8) return 'image/jpeg';
+		if (u.length > 6 && u[0] === 0x47 && u[1] === 0x49 && u[2] === 0x46) return 'image/gif';
+		if (u.length > 12 && String.fromCharCode(u[0], u[1], u[2], u[3]) === 'RIFF' && String.fromCharCode(u[8], u[9], u[10], u[11]) === 'WEBP') return 'image/webp';
+		if (u.length > 12 && String.fromCharCode(u[4], u[5], u[6], u[7]) === 'ftyp') return 'image/avif'; // avif/heic 系（ブラウザ支援時のみデコード可）
+		return '';
+	}
 	static ab2blob(ab, mime) {
-		return new Blob([ab], { type: mime || 'application/octet-stream' });
+		return new Blob([ab], { type: mime || ImgProc.sniff(ab) || 'application/octet-stream' }); // v2.23 §50: 既定型無しはマジックバイト推定（Firefox は octet-stream での decode を弾く）
 	}
 
 	/** Blob → ArrayBuffer。 */

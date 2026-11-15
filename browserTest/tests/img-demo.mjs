@@ -218,12 +218,26 @@ await A.waitForTimeout(1500);
 await shot('view', [A, B, C], [`A のビューア(取得: C の画像) ${vA}`, `B のビューア(取得: A の画像) ${vB}`, `C のビューア(取得: B の画像) ${vC}`], 'img_demo_4_view.png');
 
 console.log(JSON.stringify({ engine: name, room: ROOM, vA, vB, vC, errors }, null, 1));
+// v2.23: ① マテリアライズ待ち ② 負荷で M(manifest) 配信が 1 件落ちた場合の再同期（リロード→autoJoin で
+//   manifest 差分再マージ）。実運用の「更新して復旧」と同経路。
+for (const q of [A, B, C]) await q.waitForFunction(() => document.querySelectorAll('.ir-thumb img[src]').length >= 5, null, { timeout: 30000 }).catch(() => {});
+for (const q of [A, B, C]) {
+	if ((await q.evaluate(() => document.querySelectorAll('.ir-thumb img[src]').length)) >= 5) continue;
+	console.log('resync reload（manifest 再マージ）');
+	await q.reload();
+	await q.waitForFunction(() => document.querySelectorAll('.ir-thumb img[src]').length >= 5, null, { timeout: 40000 }).catch(() => {});
+}
 const thumbs = {
 	A: await A.evaluate(() => document.querySelectorAll('.ir-thumb img[src]').length),
 	B: await B.evaluate(() => document.querySelectorAll('.ir-thumb img[src]').length),
 	C: await C.evaluate(() => document.querySelectorAll('.ir-thumb img[src]').length),
 };
 console.log('thumbs:', JSON.stringify(thumbs));
+if (thumbs.A < 5 || thumbs.B < 5 || thumbs.C < 5) console.log('thDiag:', JSON.stringify(await A.evaluate(() => {
+	const c = window.__IRAPP.activeCtx();
+	const els = [...document.querySelectorAll('.ir-thumb')];
+	return { itemNames: c.collection.roomItems().map(x => (x.n || (x.m && x.m.n) || '')).slice(0, 8), metas: [...c.collection.metas.values()].map(x => x.n).slice(0, 8), items: c.collection.roomItems().length, slots: els.length, noImg: els.filter(e => !e.querySelector('img')).map(e => e.dataset.h10).slice(0, 4), sheetKeys: c.sheet && c.sheet.index ? [...c.sheet.index.keys()].slice(0, 8) : null, scCount: c.cal && c.cal.sc ? (c.cal.sc.count ? c.cal.sc.count() : c.cal.sc.n) : null, viewerOpen: !!document.querySelector('img.ir-img') };
+})));
 await browser.close();
 const bad = errors.length || thumbs.A < 5 || thumbs.B < 5 || thumbs.C < 5 || !vA || !vB || !vC;
 console.log(bad ? 'DEMO INCOMPLETE' : 'DEMO OK');

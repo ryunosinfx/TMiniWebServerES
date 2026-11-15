@@ -9,7 +9,7 @@ import { VirtList } from './virt_list.js';
 
 const DY = 86400000, // 1 日 ms（週/月ユニット換算。DST ±1h は日差 Math.round で吸収）
 	HH = 26, // セクションヘッダ行高さ px
-	MD = ['month', 'week', 'day']; // 表示モード集合（配列完全一致で判定。文字列 includes は部分一致誤通しになるため使用禁止）
+	MD = ['month', 'week', 'day', 'list']; // v2.24 §51: list=リスト表示（日ユニット再利用） // 表示モード集合（配列完全一致で判定。文字列 includes は部分一致誤通しになるため使用禁止）
 
 const p2 = n => (n < 10 ? `0${n}` : `${n}`),
 	dmy = d => `${d.getFullYear()}/${p2(d.getMonth() + 1)}/${p2(d.getDate())}`, // 'YYYY/MM/DD'（Intl 不使用・ローカルタイム）
@@ -46,6 +46,8 @@ export class CalView {
 		this.ch = opt.cellPx > 0 ? opt.cellPx : 88; // サムネイル枠高さ px（THUMB_PX+24。スロット寸法導出用）
 		this.fPg = opt.pagePx > 0 ? opt.pagePx : 0; // ページ高さ上書き px（0=自動）
 		this.cap = opt.cellCap > 0 ? opt.cellCap : 0; // 1 セクション表示上限（0=無制限）
+		this.hn = opt.headNote || null; // v2.24 §51: list のヘッダ横に添える列名ラベル
+		this.lrh = opt.lrowH > 0 ? opt.lrowH : 96; // v2.24 §51: list 行高さ
 		this._exp = new Map(); // ユニット鍵 -> 表示数（展開状態）
 		this.moreTxt = opt.moreText || (n => '+' + n);
 		this.oE = opt.onExpand || null;
@@ -220,7 +222,7 @@ export class CalView {
 	// ---- ユニット算術（モード別: 日=当日 0 時 ms / 週=周日 0 時 ms / 月=通月番号） ----
 	uOf(k) {
 		// 日 0 時 ms → 所属ユニット鍵
-		if (this.md === 'day') return k;
+		if (this.md === 'day' || this.md === 'list') return k; // v2.24: list は日ユニット
 		if (this.md === 'week') {
 			const d = new Date(k);
 			return k - d.getDay() * DY; // 周日起点（DST 換算は dayKey 基準のまま近似。境界ずれても同一週内まとめに支障なし）
@@ -230,7 +232,7 @@ export class CalView {
 	}
 	uShift(u, n) {
 		// ユニット ±n（隣接ユニット）
-		if (this.md === 'day') return u + n * DY;
+		if (this.md === 'day' || this.md === 'list') return u + n * DY;
 		if (this.md === 'week') return u + n * 7 * DY;
 		return u + n;
 	}
@@ -283,6 +285,7 @@ export class CalView {
 	}
 	pgPx() {
 		// 全セクション共通の高さ: ヘッダ + cap 相当の行（flex 折返し）。超過分はセクション内スクロール
+		if (this.md === 'list') return HH + 4 + (this.cap > 0 ? this.cap : 36) * this.lrh; // v2.24 §51: 行固定高（cap 行分）
 		if (this.fPg) return this.fPg;
 		const ts = Math.max(24, this.ch - 24), // サムネイル一辺（cellPx=THUMB_PX+24 で RoomCalendar が渡す）
 			wpx = Math.max(120, (this.box && this.box.clientWidth) || 320) - 10,
@@ -294,26 +297,30 @@ export class CalView {
 	pgEl(i) {
 		const s = this.sec[i];
 		if (!s) return Vw.div(null);
-		const cls = 'cal-cell cal-sec' + (this.md === 'day' ? ' cal-day' : '');
-		const bl = Vw.div(null, { class: cls }, {
+		const cls = 'cal-cell cal-sec' + (this.md === 'day' ? ' cal-day' : '') + (this.md === 'list' ? ' cal-list' : '');
+		const sty = {
 			overflowY: 'auto',
 			boxSizing: 'border-box',
 			display: 'flex',
 			flexWrap: 'wrap',
 			alignContent: 'flex-start',
 			justifyContent: 'flex-start', // v1.8 §22: 画像は左寄せ（枠線なし・ヘッダのみで区切る）
-		});
+		};
+		if (this.md === 'list') { sty.flexDirection = 'column'; sty.flexWrap = 'nowrap'; } // v2.24 §51
+		const bl = Vw.div(null, { class: cls }, sty);
 		if (this.oS) Vw.ael(bl, 'scroll', this.oS); // セクション内部スクロール追従
 		let hd = this.secLabel(i);
-		if (s.today && s.v.length && this.md === 'day') {
+		if (s.today && s.v.length && (this.md === 'day' || this.md === 'list')) {
 			const nw = new Date(); // 当日+項目ありは時刻を添える（日モードのみ。週/月はラベルを YYYY/MM/DD・YYYY/MM に限定 §21）
 			hd += ` ${p2(nw.getHours())}:${p2(nw.getMinutes())}`;
 		}
-		Vw.div(bl, { class: 'cal-ch', text: hd }, {
+		const hdEl = Vw.add(bl, 'div', { class: 'cal-ch' }, {
 			flexBasis: '100%',
 			minHeight: `${HH - 4}px`,
 			lineHeight: `${HH - 4}px`,
 		}); // sticky/配色/コントラストは CSS .cal-ch（v1.8 §22）
+		hdEl.textContent = hd;
+		if (this.md === 'list' && this.hn) Vw.add(hdEl, 'span', { class: 'ir-lcols', text: this.hn() }); // v2.24 §51: 隣に列名（小・灰）
 		const ih = Vw.div(bl, {});
 		Vw.sS(ih, { display: 'contents' });
 		this.fill(ih, s, s.u);
@@ -323,7 +330,7 @@ export class CalView {
 		// 見出し整形（§21）: 週=週開始日フル / 月=YYYY/MM / 日=変わったらフル、同じなら省略
 		const s = this.sec[i];
 		if (this.md === 'month') return mmy(s.d);
-		if (this.md === 'week') return dmy(s.d);
+		if (this.md === 'week' || this.md === 'list') return dmy(s.d); // v2.24: list はフル日付
 		if (i === 0) return dmy(s.d);
 		const p = this.sec[i - 1];
 		if (!p) return dmy(s.d);

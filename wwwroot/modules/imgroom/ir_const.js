@@ -43,6 +43,9 @@ export const CFG = {
 	HASH_ROUNDS: 10,
 	PW_BITS: 512,
 	CAL_VIEW: 'month',
+	LIST_VIEW: false, // v2.24 §51: リスト表示モードのトグル（ブラウザ保存・全部屋共通）
+	TAG_BADGES: false, // v2.24 §51: 画像のみモードのサムネイル下タグバッジ（既定非表示）
+	LIST_COLS: { th: 1, nm: 1, uid: 1, dt: 1, tg: 1, hs: 1 }, // v2.24 §51: リストで表示する要素（チェックボックス設定・共通）
 	QR_SIZE_PX: 256,
 	QR_CORRECT_LEVEL: 'H',
 	QR_VERIFY_RETRY: 8,

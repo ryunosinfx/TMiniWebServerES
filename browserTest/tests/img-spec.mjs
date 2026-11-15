@@ -137,7 +137,7 @@ await srvRadio.check();
 await A.fill('input[name="ir-uid"]', 'PONTA');
 await A.fill('input[name="ir-pw"]', PW);
 await A.click('.ir-frm button:has-text("ログイン")');
-await A.waitForSelector('input[type=file]', { timeout: 20000 });
+await A.waitForSelector('input[type=file]', { timeout: 40000 }); // v2.23 §50: 連続ループ負荷で server 認証(PBKDF2+ws)が遅くなるため緩和
 ck('serverReLogin', await A.evaluate(() => window.__IRAPP.activeCtx().mode === 'server'));
 await A.waitForSelector('.ir-sec canvas', { timeout: 10000 });
 ck('urlQrAlways', await A.evaluate(() => {
@@ -178,6 +178,7 @@ await A.setInputFiles('input[type=file]', { name: 'sakura.jpg', mimeType: 'image
 let overMsg = '';
 B.on('dialog', d => { overMsg = d.message(); d.dismiss(); });
 await B.waitForTimeout(2500); // A の sakura の M 配信を安定させてから計測
+await B.waitForFunction(() => window.__IRAPP.activeCtx().collection.metas.size >= 1, null, { timeout: 15000 }).catch(() => {}); // v2.23: 配信遅延時に baseline が 0 のままで over10Declined が +1 化けるのを防止
 const bMetas0 = await B.evaluate(() => window.__IRAPP.activeCtx().collection.metas.size);
 await B.setInputFiles('input[type=file]', { name: 'big.jpg', mimeType: 'image/jpeg', buffer: big });
 await B.waitForTimeout(2500);
@@ -1493,6 +1494,11 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	const createRoom = async nm => {
 		await D.click('button:has-text("部屋作成")');
 		await D.fill('input[name="ir-cn"]', nm);
+		// v2.23 §50: 作成フォームの非同期初期値（lastDef+withTs）に勝てず名前が化けた実例への防御—値を確認し再入力
+		await D.waitForFunction(v => (document.querySelector('input[name="ir-cn"]') || {}).value === v, nm, { timeout: 6000 }).catch(async () => {
+			await D.fill('input[name="ir-cn"]', nm);
+			await D.waitForFunction(v => (document.querySelector('input[name="ir-cn"]') || {}).value === v, nm, { timeout: 6000 });
+		});
 		await D.fill('input[name="ir-cuid"]', 'DLU');
 		await D.fill('input[name="ir-cpw"]', 'dl-pw');
 		await D.click('.ir-frm button:has-text("部屋作成")');
@@ -1511,7 +1517,10 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	await D.click('button:has-text("ログアウト")');
 	await D.waitForTimeout(700);
 	// カード表示: 最終参加日(現在形式)/枚数/並び順
-	const cards = await D.evaluate(() => [...document.querySelectorAll('.ir-crd')].map(c => ({ t: c.textContent, del: !!c.querySelector('.ir-rdel') })));
+	const cardsGet = () => D.evaluate(() => [...document.querySelectorAll('.ir-crd')].map(c => ({ t: c.textContent, del: !!c.querySelector('.ir-rdel') })));
+	await D.waitForFunction(() => document.querySelectorAll('.ir-crd').length >= 2, null, { timeout: 12000 }).catch(() => {}); // v2.23: home 再描画窓でカード欠如の状態を待つ
+	let cards = await cardsGet();
+	if (!(cards[0] && cards[0].t.includes('DLY') && cards[1] && cards[1].t.includes('DLX'))) { await D.waitForTimeout(1500); cards = await cardsGet(); }
 	ck('dlLj', cards[0].t.match(/\d{4}-\d{2}-\d{2}-\d{2}-\d{2}/) !== null, cards[0].t.slice(0, 40));
 	ck('dlCount', cards[0].t.includes('1 枚') && cards[1].t.includes('1 枚')); // RY(新)→RX(旧)… 降順
 	ck('dlOrder', cards[0].t.includes('DLY') && cards[1].t.includes('DLX'), JSON.stringify({ c0: cards[0].t.slice(0, 24), c1: cards[1].t.slice(0, 24), ljs: await D.evaluate(async () => { try { const { AppSettings } = await import('/modules/app_settings.js'); await AppSettings.load ? await AppSettings.load().catch(() => {}) : 0; return (AppSettings.state && AppSettings.state.lj) || null; } catch (e) { return 'ERR ' + e.message; } }) }));
@@ -1627,6 +1636,192 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	ck('lgOffCleared', (await G.inputValue('input[name="ir-nm"]')) === '' && (await G.inputValue('input[name="ir-uid"]')) === '' && (await G.evaluate(() => localStorage.getItem('imgroom.last.v1'))) === null);
 	await G.close();
 	await A.waitForTimeout(400);
+}
+// ---- v2.23 §50: 鍵 DL/作成者移譲(del 署名) + QR 自動ログイン + 前回モード自動選択 ----
+{
+	const T1 = await mk('KT1'), T2 = await mk('KT2'), T3 = await mk('KT3');
+	await T1.goto(BASE + '/img_room.html');
+	const KRM = 'KT' + Date.now().toString(36).slice(-4);
+	await T1.click('button:has-text("部屋作成")');
+	await T1.fill('input[name="ir-cn"]', KRM);
+	await T1.fill('input[name="ir-cuid"]', 'TU1');
+	await T1.fill('input[name="ir-cpw"]', 'kt-pw');
+	await T1.click('.ir-frm button:has-text("部屋作成")');
+	await T1.waitForSelector('input[type=file]', { timeout: 20000 });
+	await T1.selectOption('.ir-hmode', 'keep'); // モード記憶の元データ（T1 端末の MODE.cfg）
+	await T1.waitForTimeout(900);
+	// T3: パスワード QR 読み取り成功で自動ログイン（T1 オンライン採決）
+	const pack = await T1.evaluate(async () => {
+		const c = window.__IRAPP.activeCtx(), { qrPack } = await import('/modules/imgroom/ir_const.js');
+		return qrPack(c.nb, c.plainPw, window.__IRAPP._claimFor(c));
+	});
+	await T3.goto(BASE + '/img_room.html');
+	await T3.locator('button:has-text("参加")').last().click();
+	await T3.waitForSelector('.ir-modes', { timeout: 8000 });
+	await T3.fill('input[name="ir-uid"]', 'TU3');
+	const t3toastP = T3.evaluate(() => new Promise(res => {
+		const mo = new MutationObserver(() => { const el = document.querySelector('.ir-toast'); if (el) { mo.disconnect(); res(el.textContent); } });
+		mo.observe(document.body, { childList: true, subtree: true });
+		setTimeout(() => { mo.disconnect(); res(''); }, 12000);
+	}));
+	await T3.evaluate(x => window.__IRAPP._onScanJoin(x), pack);
+	ck('qrAutoMsg', (await t3toastP).includes('QR'), (await t3toastP).slice(0, 30));
+	await T3.waitForFunction(() => { const c = window.__IRAPP.activeCtx(); return !!(c && c.session.state.authed); }, null, { timeout: 25000 });
+	ck('qrAuto', true);
+	ck('qrAutoCr', await T3.evaluate(() => { const c = window.__IRAPP.activeCtx(); return !!(c._crInfo && c._crInfo.ok && !c._crInfo.self && c._crInfo.cr === 'TU1'); }), await T3.evaluate(() => JSON.stringify(window.__IRAPP.activeCtx()._crInfo || null)));
+	ck('qrClaimFile', await T3.evaluate(async () => { const { OPFS } = await import('/OPFS.js'); return await OPFS.isEf('claim/' + window.__IRAPP.activeCtx().rid + '.json'); }));
+	// T1: 前回モード記憶（ログイン画面で radio/say 自動選択）→ 再ログイン（作成者ファストパス）
+	await T1.click('button:has-text("ログアウト")');
+	await T1.waitForTimeout(800);
+	await T1.locator('button:has-text("参加")').last().click();
+	await T1.waitForSelector('.ir-modes', { timeout: 8000 });
+	await T1.fill('input[name="ir-nm"]', KRM);
+	await T1.waitForTimeout(400);
+	ck('modeMem', await T1.evaluate(() => (document.querySelector('.ir-modes input:checked') || {}).value === 'keep'), await T1.evaluate(() => (document.querySelector('.ir-modes input:checked') || {}).value));
+	ck('modeMemSay', (await T1.locator('.ir-modesay').textContent()).includes('OPFS'));
+	await T1.fill('input[name="ir-uid"]', 'TU1');
+	await T1.fill('input[name="ir-pw"]', 'kt-pw');
+	await T1.click('.ir-frm button:has-text("ログイン")');
+	await T1.waitForSelector('input[type=file]', { timeout: 20000 });
+	// T2: 通常参加（T1 の採決で OK）
+	await T2.goto(BASE + '/img_room.html');
+	await T2.locator('button:has-text("参加")').last().click();
+	await T2.waitForSelector('.ir-modes', { timeout: 8000 });
+	await T2.fill('input[name="ir-nm"]', KRM);
+	await T2.fill('input[name="ir-uid"]', 'TU2');
+	await T2.fill('input[name="ir-pw"]', 'kt-pw');
+	await T2.click('.ir-frm button:has-text("ログイン")');
+	await T2.waitForFunction(() => { const c = window.__IRAPP.activeCtx(); return !!(c && c.session.state.authed); }, null, { timeout: 25000 });
+	ck('t2Join', true);
+	// T1: 秘密鍵ダウンロード（作成者のみ）
+	const fs = await import('node:fs'), dlP = '/tmp/ir_key_50.json';
+	const dlE = T1.waitForEvent('download');
+	await T1.click('button[aria-label="部屋設定"]');
+	await T1.waitForSelector('.ir-mbx h3', { timeout: 10000 });
+	await T1.click('.ir-mbx button:has-text("秘密鍵")');
+	const dl = await dlE;
+	await dl.saveAs(dlP);
+	ck('keyDl', fs.readFileSync(dlP, 'utf8').includes('privJwk'));
+	await T1.click('.ir-mclose');
+	// T2: ログアウト → 鍵アップロード付きログイン → 移譲（room.cr=TU2, 自機 self）
+	await T2.click('button:has-text("ログアウト")');
+	await T2.waitForTimeout(800);
+	await T2.locator('button:has-text("参加")').last().click();
+	await T2.waitForSelector('.ir-modes', { timeout: 8000 });
+	await T2.click('.ir-frm button:has-text("鍵ファイル")'); // v2.23 §50: 段階開示（ボタンで file input 出現）
+	await T2.setInputFiles('input[name="ir-key"]', dlP);
+	await T2.fill('input[name="ir-nm"]', KRM);
+	await T2.fill('input[name="ir-uid"]', 'TU2');
+	await T2.fill('input[name="ir-pw"]', 'kt-pw');
+	await T2.click('.ir-frm button:has-text("ログイン")');
+	await T2.waitForFunction(() => { const c = window.__IRAPP.activeCtx(); return !!(c && c.session.state.authed); }, null, { timeout: 25000 });
+	await T2.waitForFunction(() => window.__IRAPP.activeCtx().room.cr === 'TU2', null, { timeout: 8000 });
+	ck('adoptCr', true);
+	ck('adoptSelf', await T2.evaluate(() => { const c = window.__IRAPP.activeCtx(); return !!(c._crInfo && c._crInfo.self); }));
+	// T1/T3 は del 署名（旧鍵で 'dlg:rid:TU2'）を検証して採用: 競合せずログイン継続
+	await T1.waitForFunction(() => window.__IRAPP.activeCtx().room.cr === 'TU2', null, { timeout: 10000 });
+	ck('xferT1', await T1.evaluate(() => { const c = window.__IRAPP.activeCtx(); return c.room.cr === 'TU2' && !!c.session.state.authed; }));
+	await T3.waitForFunction(() => window.__IRAPP.activeCtx().room.cr === 'TU2', null, { timeout: 10000 });
+	ck('xferT3', await T3.evaluate(() => { const c = window.__IRAPP.activeCtx(); return c.room.cr === 'TU2' && !!c.session.state.authed; }));
+	// 移譲後の自機（T2）にも鍵が保存されている（次は T2 が DL できる＝旧作成者メニューから）
+	ck('adoptKeySaved', await T2.evaluate(async () => { const { OPFS } = await import('/OPFS.js'); return await OPFS.isEf('keys/' + window.__IRAPP.activeCtx().rid + '.json'); }));
+	await T1.close();
+	await T2.close();
+	await T3.close();
+	await A.waitForTimeout(400);
+}
+{ // v2.24 §51: リスト表示モード / 要素チェックボックス設定 / タグバッジ
+	const L1 = await mk('L51');
+	await L1.goto(BASE + '/img_room.html');
+	await L1.click('button:has-text("部屋作成")');
+	await L1.fill('input[name="ir-cn"]', 'LS' + Date.now().toString(36).slice(-4));
+	await L1.fill('input[name="ir-cuid"]', 'LSU');
+	await L1.fill('input[name="ir-cpw"]', 'ls-pw');
+	await L1.click('.ir-frm button:has-text("部屋作成")');
+	await L1.waitForSelector('input[type=file]', { timeout: 20000 });
+	const RID51 = await L1.evaluate(() => window.__IRAPP.activeCtx().rid);
+	const png51 = async () => {
+		const b64 = await L1.evaluate(() => {
+			const cv = document.createElement('canvas');
+			cv.width = 40;
+			cv.height = 30;
+			const g = cv.getContext('2d');
+			g.fillStyle = '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
+			g.fillRect(0, 0, 40, 30);
+			g.fillStyle = '#fff';
+			g.fillRect(((window.__p51 = (window.__p51 || 0) + 1) * 5) % 40, 0, 3, 30);
+			return cv.toDataURL('image/png').slice(22);
+		});
+		return Buffer.from(b64, 'base64');
+	};
+	await L1.setInputFiles('input[type=file]', { name: 'ls-a.png', mimeType: 'image/png', buffer: await png51() });
+	await L1.setInputFiles('input[type=file]', { name: 'ls-b.png', mimeType: 'image/png', buffer: await png51() });
+	await L1.waitForFunction(() => window.__IRAPP.activeCtx().collection.roomItems().length >= 2, null, { timeout: 25000 });
+	await L1.evaluate(async () => {
+		const c = window.__IRAPP.activeCtx();
+		for (const x of c.collection.roomItems()) await c.collection.setTags(x.h10, ['alpha', 'beta']);
+	});
+	await L1.waitForTimeout(900);
+	ck('l51DefOff', (await L1.locator('.ir-tgline').count()) === 0 && (await L1.locator('.ir-lrow').count()) === 0);
+	// タグバッジ: 既定 OFF → トグルでサムネイル下にバッジ
+	await L1.click('label.ir-sw:has(input[data-sw="btn.badge"]) .ir-swtxt');
+	await L1.waitForFunction(() => document.querySelectorAll('.ir-thumb:not(.ir-lth) .ir-tgline').length >= 2, null, { timeout: 12000 });
+	ck('l51Badge', await L1.evaluate(() => [...document.querySelectorAll('.ir-thumb:not(.ir-lth) .ir-tgline')].every(l => [...l.children].some(b => b.textContent === 'alpha'))));
+	// リスト表示: 6 列・作成時間降順・ヘッダ隣に列名（小・灰）
+	await L1.click('label.ir-sw:has(input[data-sw="btn.list"]) .ir-swtxt');
+	await L1.waitForFunction(() => document.querySelectorAll('.ir-lrow').length >= 2, null, { timeout: 12000 });
+	const i51 = await L1.evaluate(() => ({
+		note: (document.querySelector('.cal-ch .ir-lcols') || {}).textContent || '',
+		hd: (document.querySelector('.cal-ch') || {}).textContent || '',
+		rows: [...document.querySelectorAll('.ir-lrow')].map(r => ({
+			ts: +r.dataset.ts,
+			nm: (r.querySelector('.ir-lc-nm') || {}).textContent || '',
+			uid: (r.querySelector('.ir-lc-uid') || {}).textContent || '',
+			dt: (r.querySelector('.ir-lc-dt') || {}).textContent || '',
+			tg: [...r.querySelectorAll('.ir-lc-tg .ir-tgl')].map(e => e.textContent),
+			hs: (r.querySelector('.ir-lc-hs') || {}).textContent || '',
+		})),
+	}));
+	ck('l51Head', /\d{4}\/\d{2}\/\d{2}/.test(i51.hd) && i51.note === 'サムネイル 画像名 投稿者 投稿日 タグ ハッシュ値', JSON.stringify(i51).slice(0, 120));
+	ck('l51Desc', i51.rows.length >= 2 && i51.rows[0].ts >= i51.rows[1].ts);
+	ck('l51Cells', i51.rows.length >= 2 && i51.rows[0].nm.endsWith('.png') && i51.rows[0].uid === 'LSU' && /\d{2}:\d{2}/.test(i51.rows[0].dt) && i51.rows[0].tg.includes('alpha') && /^[0-9A-Za-z_-]{16,}$/.test(i51.rows[0].hs));
+	await L1.waitForFunction(() => !!document.querySelector('.ir-lrow .ir-lth img[src]'), null, { timeout: 15000 });
+	ck('l51Thumb', true);
+	// 表示設定: タグ/ハッシュ値を非表示（ブラウザ保存・全部屋共通）→ 列と列名が追随
+	await L1.click('.ir-vcfg');
+	await L1.waitForSelector('input[name="chk-lc-tg"]', { timeout: 8000 });
+	await L1.click('label:has(input[name="chk-lc-tg"]) span');
+	await L1.click('label:has(input[name="chk-lc-hs"]) span');
+	await L1.locator('.ir-mclose').first().click();
+	await L1.waitForFunction(() => document.querySelectorAll('.ir-lc-hs').length === 0 && document.querySelectorAll('.ir-lc-tg').length === 0, null, { timeout: 12000 });
+	ck('l51ColsCfg', (await L1.evaluate(() => (document.querySelector('.cal-ch .ir-lcols') || {}).textContent)) === 'サムネイル 画像名 投稿者 投稿日');
+	// 永続復元: ログアウト→再ログイン（リスト ON / hs,tg 非表示 / バッジ ON）
+	await L1.click('button:has-text("ログアウト")');
+	await L1.waitForTimeout(1500);
+	await L1.click('button:has-text("参加")');
+	await L1.waitForSelector('input[name="ir-nm"]', { timeout: 10000 });
+	const nb51 = Buffer.from(RID51.split('-').slice(1).join('-').replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+	const login51 = async () => {
+		await L1.fill('input[name="ir-nm"]', nb51);
+		await L1.fill('input[name="ir-uid"]', 'LSU');
+		await L1.fill('input[name="ir-pw"]', 'ls-pw');
+		await L1.click('.ir-frm button:has-text("ログイン")');
+		await L1.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 25000 });
+	};
+	await login51().catch(async () => {
+		await L1.waitForTimeout(2000); // サーバ中継レース（v2.23 §50 観察）耐性で 1 回再試行
+		if ((await L1.locator('input[name="ir-pw"]').count()) === 0) {
+			await L1.click('button:has-text("参加")');
+			await L1.waitForSelector('input[name="ir-nm"]', { timeout: 10000 });
+		}
+		await login51();
+	});
+	await L1.waitForFunction(() => document.querySelectorAll('.ir-lrow').length >= 2, null, { timeout: 15000 });
+	ck('l51Persist', (await L1.locator('.ir-lc-hs').count()) === 0 && await L1.evaluate(() => !!document.querySelector('input[data-sw="btn.badge"]').checked && document.querySelector('input[data-sw="btn.list"]').checked === true));
+	await L1.click('label.ir-sw:has(input[data-sw="btn.list"]) .ir-swtxt');
+	await L1.waitForFunction(() => document.querySelectorAll('.ir-thumb:not(.ir-lth) .ir-tgb').length >= 2, null, { timeout: 12000 });
+	ck('l51BadgeBack', true);
+	await L1.close();
 }
 await N9.close();
 await K1.close();

@@ -286,6 +286,32 @@ new RoomApp() .boot() // window.onload から呼ぶ
 //   ir-remember チェック=localStorage imgroom.remember.v1('1')/imgroom.last.v1({nm,uid})。tryLogin 成功時に保存、loginForm 初期値は rl>記憶。
 //   ログイン提出は submit 単一入口(ボタン→requestSubmit→submit→doLogin。pw 保存検知)。ビュー出現<login 成功処理なので効果待ち waitForFunction 必須。
 //   AppSettings.queue はメモリ(_cfg/_state)へ setPath 即反映(楽観)+flush で ops 再適用。テスト ck() は 3 引数目=失敗時 dbg 出力。
+// —— v2.23 §50: FF 作動 + 鍵移譲 + QR 即時ログイン + モード記憶 ——
+// RoomApp._rmTree(dh): FF は FileSystemDirectoryHandle.remove({recursive:true}) 非対応 →
+//   entries() から [name,kind] を先に回収 → dir は再帰 → removeEntry 逐一 → rh.remove() 本体。
+// ImgProc.sniff(ab): マジックバイトで MIME 推定(png/jpeg/gif/RIFF..WEBP/..ftyp)。ab2blob と
+//   transfer fetch の new Blob([ab]) で既定適用(FF は octet-stream の createImageBitmap を弾く)。
+//   load は blob.type が image/* 以外ならスニッフ再タイプ→bitmap。フォールバック img は data: URL
+//   (FF は CSP3 の同源 blob:='self' 一致を未実装。meta CSP とサーバヘッダは交差で効く)。
+// _keyDl(ctx)(作成者メニュー btn.key.dl): keys/<rid>.json を検証後 imgroom-key-<rid>.json
+//   {v,rid,ct,uid,claim,json,privJwk} で DL(a[download])。検証は privJwk import(extractable=true)→
+//   **pub は x/y jwk 再導入で export**(Chromium は jwk 秘密鍵の exportKey('spki') を InvalidAccessError)。
+// loginForm: btn.key.pick 押下時のみ input[name=ir-key] 生成(段階開示—常置だと部屋出現待ち
+//   'input[type=file]' と衝突)、読文を this._pendKey(loginForm 冒頭で pendingClaim/_pendKey クリア)。
+//   tryLogin 成功→_adoptKey(ctx,txt): rid 一致/o.json 再署名=claim.sg 相当検証/claim.pk=spki(pub)一致
+//   →keys/<rid>.json(uid=自機)+room.cr=ctx.uid,cg=now,_crInfo 即設定+ctx._delSig=旧鍵 sign('dlg:'+rid+':'+uid)
+//   →pushC が o.del を一度だけ同載。
+// room_session: _onC async。_verifyDel(p)=this._claimPk(spki) で 'dlg:'+rid+':'+p.cr を p.del 検証。
+//   cr 変化フレーム: p.del 検証成立なら競合せず採用+emit 'cr'(room_app: _crInfo/renderRoom/Toast
+//   msg.key.crchanged)。不能なら従来 conflict(アンカー未参加端末は妥協明記)。_claimPk は _creatorFlow で設定。
+// _onScanJoin(pack)(テストフック __IRAPP._onScanJoin): nm/pw+pendingNb+pendingClaim+記憶 uid 自動記入
+//   +applySel。pw+uid なら Toast msg.qr.auto で requestSubmit 即ログイン(uid 欠如 msg.qr.nouid)。
+//   claim は _creatorFlow 合流(§47 と同一の再起算+鍵一致)+claim/<rid>.json 保存。
+// v2.24 §51: RoomCalendar.setListMode/setBadge/setCols + _mkSwitch(cal.bar)。CalView md に 'list' 追加(日ユニット・headNote=列名ラベル・pgPx は lrh 固定高)。mounts の要素が行になりうるため _irc 走査は必ず _thumbsOf() 経由。items は collection.viewEnrich で ts/uid/nmP/tg 補強。cfg: LIST_VIEW/TAG_BADGES(既定 false)/LIST_COLS(既定全 1) は AppSettings.setNested でブラウザ保存・全部屋共通。renderRoom の setMode(CAL_VIEW) は !ctx.cal.listOn のときのみ。room_app.viewCfgForm() が chk-lc-<key> 6 種。
+// createForm 初期値(§27 lastDef+withTs)は **フィールド空のときのみ**適用(v2.23: 非同期解決後に入力を消すレース修正)。
+// MODE 記憶: tryLogin 成功/.ir-hmode 変更で setNested('MODE.<rid>') と 'MODE.nb.'+nb。読み取りは
+//   **cfg.MODE[rid] / cfg.MODE.nb[nbK](ネスト)**。applySel は記憶があるときのみ radio 触る
+//   (記憶なしの手動選択上書き禁止—keepAdopt 崩した実例)。MODES は room_session ローカル(room_app 不可)。
 //   v2.16 §43: viewer は .ir-navz 帯（左右 1/3）で全項目 ts 降順の前後切替（未保有は fetchBody、周回）、
 //   単クリック 300ms 遅延／連続クリックと中央 2 クリック（320ms 以内）で enterFs。←/→ は全画面でなくても navStep。
 ```

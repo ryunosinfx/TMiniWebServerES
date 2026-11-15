@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.22
+- ステータス: ドラフト v2.24
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1469,3 +1469,52 @@ ponta 側を**強制再読込**したうえで再試行するとコンソール�
 
 ### テスト（「SPEC OK」）
 - `modeEqual`（4 ボタン等幅・フォーム幅 95% 以上）/ `modeSelColor`・`modeSelColor2`（選択ボタンのみ背景違い、保持へ移動）/ `modeSayInit`・`modeSayKeep`（説明文案がモードで切替）/ `lgSubmitFired`（ログインボタンで submit 正確 1 回）/ `lgSaved`（記憶 ON ログインで imgroom.last.v1 に uid）/ `lgPrefill`・`lgRemChecked`（次回フォームに部屋名/UID 初期値、チェック継続）/ `lgOffCleared`（OFF で記憶・初期値とも消去）。
+
+## 50. 追加仕様 v2.23: Firefox 作動（削除/表示）+ 秘密鍵 DL と作成者移譲 + QR 即時ログイン + 前回モード自動選択
+要求（2026-11-15）: Firefox で部屋の削除ボタンが作動しないため作動させる。部屋の作成者だけ秘密鍵の DL ができ、それをアップロードすると作成者を移譲できるようにする。パスワード QR 使用時は読み込み成功時点でそのままログインし、メッセージにその旨を記載する。このとき QR の URL で開いたときのようにアンカーのサインを再起算し秘密鍵と一致する作成者チェックを実施する。部屋ごとに前回どのモードで開いたか記憶し、ログイン画面で自動選択する。
+
+- **FF 削除**: `FileSystemDirectoryHandle.remove({recursive:true})` は Firefox 未対応（確認 OK 後に例外で無反応）。`RoomApp._rmTree(dh)` を追加 — `dh.entries()` から `[name, kind]` を**先に回収**（反復中の削除でハンドルが狂う）→ディレクトリは再帰→`removeEntry(name)`→最後に `rh.remove()` 本体。確認文・孤児除去ロジックは v2.21 のまま。
+- **FF 表示（随伴修正）**: サーバ CSP `img-src 'self' data:` と meta は**共通部分**で効く。Firefox は CSP3 の「同源 `blob:` は `'self'` に一致」を**実装しておらず** objectURL `<img>` が遮断される（Chromium は通る）→ `ImgProc.load` の decode フォールバックを **data: URL**（`'data:'+(blob.type||'image/png')+';base64,'+Y.a2B(ab)`）へ変更。加えて OPFS 読み `new Blob([ab])`（type=octet-stream）は Firefox の createImageBitmap が厳格に弾く→ `ImgProc.sniff(ab)`（マジックバイト: png/jpeg/gif/RIFF-WEBP/ftyp）を `ab2blob` と transfer fetch の Blob 生成で既定適用、`load` は type が image/* でないときスニッフ再タイプ。
+- **秘密鍵 DL（作成者のみ）**: 部屋設定モーダル（self のとき）に `btn.key.dl`。`_keyDl(ctx)` は `keys/<rid>.json` の privJwk で `o.json` を再署名しクレーム sg/pk と照合（**Chromium は jwk 導入秘密鍵の `exportKey('spki')` を InvalidAccessError で拒否**→ x/y 公開成分を jwk 再導入して export した pub で検証）してから、ファイル `imgroom-key-<rid>.json` {v,rid,ct,uid,claim,json,privJwk} を a[download]+blob anchor で DL（ダウンロードは CSP img-src の対象外）。
+- **移譲（ログイン時アップロード）**: `loginForm` に `btn.key.pick`（**段階開示**: 通常は `input[type=file]` を DOM に置かない。常置すると既存テスト/UI の「部屋が開いた」判定 `input[type=file]` と衝突し誤爆した）。押下で `input[name="ir-key"]` 生成、読んだ JSON を `this._pendKey` に保持（`loginForm` 冒頭で `pendingClaim/_pendKey` クリア）。tryLogin 成功時に `_adoptKey(ctx, txt)`: rid 一致→privJwk import（ECDSA P-256, **extractable=true**）→`o.json` 再署名→claim の pk/spki と**鍵が一致**→`keys/<rid>.json`（uid=自機）保存→`room.cr=ctx.uid`, `cg=Date.now()`→`ctx._delSig` = **旧鍵での `'dlg:'+rid+':'+uid` 署名**→次回復号の `pushC` が `o.del` を一度だけ同載。自機 `_crInfo={ok,self:true,...}` 即設定+renderRoom（失敗しても移譲自体は成立させる）。
+- **受け側採否（`room_session._onC` を async 化、`_verifyDel`）**: `cr` 変化フレームで `p.del` ありかつ自セッションがクレーム pk（`session._claimPk`。`_creatorFlow` がログイン時に URL アンカー/QR pack/`keys` のいずれかから設定）を持つ場合、**旧クレーム pk** で `'dlg:'+rid+':'+p.cr` の ECDSA 検証→**成立なら競合扱いせず即採用**（`emit 'cr'`→room_app が `_crInfo`/renderRoom 更新+`msg.key.crchanged` Toast）。検証不能なら従来どおり conflict 経路（アンカー参加を一度もしていない端末は競合扱い—仕様上の妥協として明記）。
+- **QR 即時ログイン**: `loginForm` のスキャン成功コールバックを `onJoinScan` に抽出（テストフック `__IRAPP._onScanJoin(pack文字列)`）。pack から nm/pw 記入+`pendingNb`+**`pendingClaim`**、§49 の記憶 uid があれば UID 自動記入+`applySel`。pw+uid 揃っていれば Toast `msg.qr.auto`（「パスワード QR の読み込み成功のため、そのままログインします」）で**即 `requestSubmit()`**（uid 欠如は `msg.qr.nouid` まで）。claim は §47 の `_creatorFlow` に合流し**サイン再起算+秘密鍵一致チェック**（URL アンカーと同一機構）→認証表示、受け claim は `claim/<rid>.json` 保存。
+- **前回モード記憶**: tryLogin 成功時とヘッダモード切替（`.ir-hmode`）で `AppSettings.setNested('MODE.<rid>')` と `MODE.nb.<nameB64U>` に記録。`loginForm` 起動/部屋名入力追従の `applySel` は **cfg.MODE がネスト構造**（`cfg.MODE[rid]`、`cfg.MODE.nb[nbK]`。平坦 `cfg['MODE.<rid>']` は永遠に undefined—陷阱）であること。記憶があるときのみ radio を触る（**記憶なしで現在選択を上書きしてはいけない**—手動 keep 選択が部屋名入力で消え §40 keepAdopt を壊した実例あり）。server 記憶は srvOn 部屋のみ適用。
+- **作成フォーム初期値の上書きレース（修正）**: `createForm` は §27 の最終作成値プリフィル（`lastDef` 非同期 + `withTs` タイムスタンプ付与）を持つ。高速連続操作ではユーザー/自動化の入力がプリフィル解決後に消され、`room.nm = 前部屋名-2026-…` の別部屋が作られていた（§48 dlOrder flake の正体。nb は nameB64U 先頭長で切られるため rid からも化けが見える）。→ **フィールドが空のときのみプリフィル適用**（`!nmIn.value.trim()` / `!uidIn.value`）。テスト側も `ir-cn` 値の確認→再入力ガード追加。
+- **観察（サーバ側・対象外）**: `SampleServer.js` の `Chat.filterUserList` は `Chat.bl1/bl2/bl3` という**モジュール大域の作業配列**を使い、途中で `await sendForRoom` する。別接続の入室/退室処理と交差すると作業配列が splice で食い合い、**部屋メンバー一覧の壊れ（配信漏れ 1 件・採決応答待ち）が起こりうる**。高負荷時に manifest 1 件や投票 1 通が失せる再現不安（img-demo A=4/5、単独再実行で 2/3 失敗）はこのパターンと整合。**サーバファイルは変更禁止の約束のためクライアント側で吸収**—テストはリロード→autoJoin での manifest 再マージ（実運用の更新復旧と同経路）をデモに組み込み。`sendForRoom` の送信先配列確保は同期ループなので送信自体は安全。
+- 教訓: ① FF は `remove({recursive:true})` 非対応（`_rmTree` 手動再帰で解決）。② CSP `img-src 'self'` は FF で同源 blob: URL 不可（data: URL が安全。サーバヘッダと meta は交差）。③ `createImageBitmap` は blob の MIME 必須（octet-stream を FF は弾く→スニッフ）。④ ログインフォームに `input[type=file]` を追加すると部屋出現待ちの既存セレクタが誤早まり—**段階開示**で回避。⑤ `MODES` は room_session のローカル定数。room_app から参照すると ReferenceError でフォーム描画が途中中断（submit ボタン消失）。`radios[m]` が有効モードの定義そのもの。⑥ ECDSA jwk 秘密鍵→spki export は Chromium 不可（公開成分 jwk 経由で可）。⑦ **作成者以外単独（投票者ゼロ）のログインは設計上「採決応答なし」**（§5.3/§6.2）。テスト/再現では作成者同一 uid のファストパスか他メンバー常時オンラインで組む。⑧ 手製 8×8 PNG ハックストリームは両ブラウザで decode 失敗—再現画像は canvas.toDataURL で作る。⑨ 非同期プリフィル（lastDef 等）は入力開始後の上書き禁止（空のときのみ）。⑩ adopt 直後の「オフラインモード」トーストは一時的（§9.7 の offline→online 窓）。実挙動（送受信・authed）は継続しており害なし。
+
+### テスト（img-spec「SPEC OK」追加）
+- `qrAutoMsg`（スキャン成功 Toast「パスワード QR の読み込み成功…」）/ `qrAuto`（その後 authed まで自動完了）/ `qrAutoCr`（作成者バッジ「TU1 （署名一致）」・self でない）/ `qrClaimFile`（`claim/<rid>.json` 保存）/ `modeMem`・`modeMemSay`（前回 keep がログイン画面 radio/say 文に自動選択）/ `keyDl`（DL ファイルに privJwk+json 同梱）/ `t2Join`（通常参加・採決 OK）/ `adoptCr`（鍵付きログイン後 `room.cr`=自機 uid）/ `adoptSelf`（移譲後 self 認定）/ `xferT1`（旧作成者側が移譲 C を検証し採用・ログイン継続）/ `xferT3`（QR 参加メンバーが del 検証で採用）/ `adoptKeySaved`（移譲先 `keys/<rid>.json` 実在）。
+- img-demo: 負荷時に manifest 配信漏れへ**リロード再同期ガード**（thumbs<5 の端末を reload→autoJoin 再マージ→出現待ち）追加。
+- img-perf: ensureLogin は「pw フィールド出現 or authed」優先待ちへ（参加ボタン空振りレース対策）。
+
+---
+
+## §51（v2.24 追加）: リスト表示モード・要素表示設定・タグバッジ
+
+### 1. リスト表示モード（トグルスイッチ）
+- カレンダー・ツールバー（`.ir-calbar`）にトグルスイッチ **btn.list**。画像のみモード（日/週/月）とは**別の表示**で、オンにすると日/週/月ボタンとピックアップは一時的に隠れる（`.ir-calbar.ir-lhide`）。オフに戻ると現在の `CAL_VIEW` が復元される。
+- 実装は CalView の 4 番目のモード `md='list'`。**日ユニット・作成時間（meta.ts）降順**は既存のバケット降順をそのまま利用。日付ヘッダー（`.cal-ch`）は**そのまま**（list はフル `YYYY/MM/DD`、当日は既存同様 hh:mm 追記）。
+- **ヘッダーの隣に、表示中の列名を一段小さくグレーで並べる**（`.ir-lcols`。列設定に追随し表示順そのまま。例「サムネイル 画像名 投稿者 投稿日 タグ ハッシュ値」）。CalView の `headNote` オプションで列名テキストを注入。
+
+### 2. 列（表示順固定: サムネイル・画像名・投稿者・投稿日・タグ・ハッシュ値）
+- 行 `.ir-lrow`（高さ 96 固定）。各列は `.ir-lcell .ir-lc-<key>`:
+  - **th** サムネイル（84px 固定。既存の仮想窓マテリアライズを完全再利用: mount=行、`winPass` が行内の `.ir-thumb`（`_irc` 保持）を実体化/解放。シート slice もそのまま）
+  - **nm** 画像名（meta.n を b64url 復号。`Collection.viewEnrich` が `nmP` としてトップレベル化）
+  - **uid** 投稿者（meta.u）、**dt** 投稿日（当日ヘッダー下の行なので hh:mm:ss。title に epoch ms）、**tg** タグ（chip 表示）、**hs** ハッシュ値（h10 全文、title 併記）
+- 項目は `collection.viewEnrich(x)` で `ts/uid/nmP/tg` を補強してから setItems（タグ編集直後の再描画でもバッジ/列に即反映）。
+
+### 3. 要素の表示設定（チェックボックス・ブラウザ保存・全部屋共通）
+- カレンダーバーの **👁 表示設定**（`.ir-vcfg`）→ ダイアログに 6 要素のチェックボックス（`chk-lc-<key>`）。
+- 保存は `AppSettings.setNested('LIST_COLS.<key>')`（**利用者のブラウザ上・user_settings・全部屋共通**）。v2.22 と同じ楽観メモリ＋失敗時ロールバック＋`err.persist`。
+- 変更は `cal.setCols(cfg.LIST_COLS)` で行 DOM を再構築し即反映（列名ラベルも追随）。既定は全表示。
+
+### 4. タグバッジ（画像のみモード）
+- カレンダーバーのトグルスイッチ **btn.badge**、`cfg.TAG_BADGES` **既定は非表示**。オンで画像のみモードのサムネイル下にバッジ（`.ir-tgline` 内 `.ir-tgb`。4 個超は `+N`）。
+- `setBadge` はマウント済みサムネイルへ即ペイント＋`renderItem` 経由で新規マウントにも反映。リストモードのタグ列とは独立。
+
+### 5. 復元と教訓
+- `LIST_VIEW`/`TAG_BADGES`/`LIST_COLS` は RoomCalendar 構築時（＝各部屋の renderRoom 初回）に cfg から復元。**renderRoom の `setMode(CAL_VIEW)` はリスト復元を上書きしてはいけない**（実際に list 復元が即解除されていた事案。`if (!ctx.cal.listOn)` で保護）。
+- 教訓: ① `this.mounts` の要素が行になったため、`_irc` を前提に mounts を走査する全経路（setProg/clearProg/refresh/setBadge）は `_thumbsOf()`（行→内側 `.ir-thumb` 解決）経由に統一。Firefox で `r.badge` 例外の実走査あり。② 共有 2 枚で同じ canvas 画素だと**同一ハッシュで manifest 重複排除**され「2 枚目がない」誤解を生む（repro は画素ランダム化）。③ 再ログイン（作成者ファストパス）はサーバ中継レースで一時的失敗しうるためテストは 1 回再試行ガード。
+- テスト（img-spec §51）: `l51DefOff`（既定 OFF 双方）/`l51Badge`/`l51Head`（フル日付ヘッダ＋列名厳密一致）/`l51Desc`（ts 降順）/`l51Cells`（6 列の実値）/`l51Thumb`（窓内実体化）/`l51ColsCfg`（tg,hs 非表示＋列名追随）/`l51Persist`（ログアウト→再ログインで list ON・hs 非表示・badge ON 復元）/`l51BadgeBack`。Firefox でも list51.mjs で同一フロー green。

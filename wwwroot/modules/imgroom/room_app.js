@@ -146,7 +146,7 @@ export class RoomApp {
 		try {
 			const c = claimParse(o.claim);
 			if (!c) return false;
-			const priv = await crypto.subtle.importKey('jwk', o.privJwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']),
+			const priv = await crypto.subtle.importKey('jwk', o.privJwk, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']), // v2.23 §50: extractable（公開鍵 spki 再構成で claim.pk と照合するため）
 				pub = await crypto.subtle.importKey('spki', Y.U2u(c.pk), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
 				data = Y.s2u(o.json),
 				orig = await crypto.subtle.verify(RoomApp.CR_EC, pub, Y.U2u(c.sg), data),
@@ -181,8 +181,75 @@ export class RoomApp {
 		return (ctx && ctx._crInfo && ctx._crInfo.claim) || '';
 	}
 	// 参加/作成/autoJoin 共通: クレームの解決→検証→自機署名一致→room.cr 補完→表示
+	// v2.23 §50: 作成者専用 秘密鍵 DL（鍵 JSON をファイル出力）
+	async _keyDl(ctx) {
+		const o = await this._crKeysLoad(ctx.rid);
+		if (!o || !o.privJwk) {
+			Toast(t('msg.key.none'));
+			return;
+		}
+		const txt = JSON.stringify({ v: 1, rid: ctx.rid, ct: o.ct, uid: o.uid, claim: o.claim, json: o.json, privJwk: o.privJwk }), // v2.23 §50: json（署名対象の元 JSON）を同梱。なしでは受取側が再検証不能
+			a = document.createElement('a');
+		a.href = URL.createObjectURL(new Blob([txt], { type: 'application/json' }));
+		a.download = 'imgroom-key-' + ctx.rid + '.json';
+		document.body.appendChild(a);
+		a.click();
+		setTimeout(() => {
+			URL.revokeObjectURL(a.href);
+			a.remove();
+		}, 4000);
+		Toast(t('msg.key.dl'));
+	}
+	// v2.23 §50: 鍵ファイルの所持証明（鍵→SPKI がクレーム pk と一致 + 秘密鍵再署名が検証通過）→ 自機保存し room.cr を奪取、C に del 署名を同封
+	async _adoptKey(ctx, txt) {
+		let o = null;
+		try {
+			o = JSON.parse(txt);
+		} catch (e) {
+			o = null;
+		}
+		if (!o || !o.claim || !o.privJwk || (o.rid && o.rid !== ctx.rid)) {
+			Toast(t('msg.key.bad'));
+			return;
+		}
+		const c = claimParse(o.claim);
+		if (!c || !o.json) { // v2.23 §50: 署名対象 json 同梱が必須（旧形式の鍵ファイルは拒否）
+			Toast(t('msg.key.bad'));
+			return;
+		}
+		try {
+			const priv = await crypto.subtle.importKey('jwk', o.privJwk, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']), // v2.23 §50: extractable（公開鍵 spki 再構成で claim.pk と照合するため）
+				// v2.23 §50: Chromium は jwk 導入の秘密鍵から spki export を弾く（InvalidAccessError）→ 公開成分 jwk で再導入して export
+				pub = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: o.privJwk.x, y: o.privJwk.y }, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']),
+				spki = await crypto.subtle.exportKey('spki', pub),
+				data = Y.s2u(o.json),
+				fresh = await crypto.subtle.sign(RoomApp.CR_EC, priv, data);
+			if (Y.B2U(Y.u2B(new Uint8Array(spki))) !== c.pk || !(await crypto.subtle.verify(RoomApp.CR_EC, pub, fresh, data))) {
+				Toast(t('msg.key.bad'));
+				return;
+			}
+			await OPFS.w('keys/' + ctx.rid + '.json', Y.s2u(JSON.stringify({ ver: 1, json: o.json, ct: c.ct, uid: ctx.uid, claim: o.claim, privJwk: o.privJwk })).buffer);
+			const ds = await crypto.subtle.sign(RoomApp.CR_EC, priv, Y.s2u('dlg:' + ctx.rid + ':' + ctx.uid));
+			ctx._delSig = Y.B2U(Y.u2B(new Uint8Array(ds))); // 旧作成者鍵による「rid:新uid」移譲証明
+		} catch (e) {
+			ef(e, 'room_app.adoptKey');
+			Toast(t('msg.key.bad'));
+			return;
+		}
+		ctx.room.cr = ctx.uid;
+		ctx.room.cg = Date.now();
+		ctx.session._claimPk = c.pk;
+		// v2.23 §50: 移譲成立を自機状態へ即反映（paintCr 待たず _crInfo を確立。以後の QR/鍵メニューも自機有効）
+		ctx._crInfo = { ok: true, self: true, cr: ctx.uid, ct: c.ct, claim: o.claim };
+		await this.pushC(ctx);
+		if (this.active === ctx.rid) {
+			this.renderRoom(ctx.rid).catch(e => ef(e, 'room_app.adoptRender')); // v2.23 §50: 再描画失敗で移譲自体を失敗させない
+			this.paintCr(ctx);
+		}
+		Toast(t('msg.key.adopt'));
+	}
 	async _creatorFlow(ctx) {
-		let claim = RoomApp.hashClaim() || '';
+		let claim = RoomApp.hashClaim() || this.pendingClaim || ''; // v2.23 §50: QR pack 経由クレーム（URL アンカーと同様に検証）
 		const keys = await this._crKeysLoad(ctx.rid);
 		if (!claim && keys && keys.claim) claim = keys.claim; // 自機が鍵を持つ=作成者自身。QR を経由しなくてもクレーム復元可
 		if (!claim) {
@@ -191,17 +258,19 @@ export class RoomApp {
 				if (await OPFS.isEf(p)) claim = (JSON.parse(Y.u2s(await OPFS.r(p))) || {}).claim || '';
 			} catch (e) { /* noop */ }
 		}
+		this.pendingClaim = null; // v2.23 §50: 一房间一回消費
 		if (!claim) return;
 		const nmPlain = RoomApp.unB64(ctx.nb) || ctx.title || '',
 			v = await this._crVerify(claim, nmPlain);
 		ctx._crInfo = { claim, ok: v.ok, cr: v.cr || '', ct: (claimParse(claim) || {}).ct || 0, self: false };
+		if (ctx.session) ctx.session._claimPk = (claimParse(claim) || {}).pk || ''; // v2.23 §50: 移譲 C の del 検証用公開鍵
 		if (v.ok && !ctx.room.cr && v.cr) ctx.room.cr = v.cr; // 作成者不明状態の救済: 署名検証できたクレームから認識
 		if (keys && (await this._crSelfCheck(ctx))) { // 署名再作成一致 → この端末は作成者
 			ctx._crInfo.self = true;
 			if (v.ok && ctx.room.cr !== ctx.uid && ctx._crInfo.cr === ctx.uid) ctx.room.cr = ctx.uid;
 			else if (!v.ok && ctx._crInfo.cr === ctx.uid) ctx.room.cr = ctx.uid;
 		}
-		if (RoomApp.hashClaim()) await OPFS.w('claim/' + ctx.rid + '.json', Y.s2u(JSON.stringify({ claim, ts: Date.now() })).buffer).catch(() => {}); // アンカー由来は保存（次回以降も認識）
+		if (claim && claim !== (keys && keys.claim)) await OPFS.w('claim/' + ctx.rid + '.json', Y.s2u(JSON.stringify({ claim, ts: Date.now() })).buffer).catch(() => {}); // アンカー由来は保存（次回以降も認識）
 		if (this.active === ctx.rid) this.paintCr(ctx);
 	}
 	paintCr(ctx) {
@@ -393,6 +462,7 @@ export class RoomApp {
 		if (ctx.cal) ctx.cal.keep = m === 'keep'; // 即時反映（次回 fetchBody/表示から）
 		if (ctx.foot) Vw.sS(ctx.foot, { display: ctx.sync.enabled ? '' : 'none' });
 		AppSettings.setNested('MODE.' + ctx.rid, m).catch(e => ef(e, 'room_app.mode'));
+		AppSettings.setNested('MODE.nb.' + (ctx.nb || ''), m).catch(e => ef(e, 'room_app.modeNb')); // v2.23 §50
 		const rl = (AppSettings.state && AppSettings.state.roomLogin || {})[ctx.rid];
 		if (rl) AppSettings.setState('roomLogin.' + ctx.rid, Object.assign({}, rl, { mode: m })).catch(e => ef(e, 'room_app.rlMode')); // 次回起動の自動再参加にも保持
 	}
@@ -484,6 +554,15 @@ export class RoomApp {
 		return n;
 	}
 	// 部屋完全消去: セッション dispose → 孤児本体+メタ物理削除 → rooms/<rid> 再帰削除 → 鍵/クレーム/タグ台帳/設定除去
+	// v2.23 §50: ディレクトリ手動再帰削除（FF 対応。反復中に消すと挙動未定義なので先に収集）
+	static async _rmTree(dh) {
+		const es = [];
+		for await (const [name, h] of dh.entries()) es.push([name, h.kind]);
+		for (const [name, kind] of es) {
+			if (kind === 'directory') await RoomApp._rmTree(await dh.getDirectoryHandle(name));
+			await dh.removeEntry(name);
+		}
+	}
 	async _purgeRoom(rid) {
 		if (!rid) return;
 		if (this.rooms.has(rid)) this.disposeRoom(rid); // §12: 開いている部屋は先にセッション終端
@@ -496,7 +575,10 @@ export class RoomApp {
 		await this.store.delMetas(orphans).catch(e => ef(e, 'room_app.purgeMetas'));
 		try {
 			const rh = await OPFS.gDH(rid, await OPFS.gDHR('rooms', false)); // gDH(名前, 親ハンドル): 作成しない
-			if (rh) await rh.remove({ recursive: true }); // 直下（room.json/manifest/sheet/...）一括
+			if (rh) { // v2.23 §50: Firefox は remove({recursive:true}) 非対応 → entries() で手動再帰削除
+				await RoomApp._rmTree(rh);
+				await rh.remove();
+			}
 		} catch (e) {
 			ef(e, 'room_app.purgeDir');
 		}
@@ -590,6 +672,8 @@ export class RoomApp {
 	// ---- ログインフォーム（§5.1: ユーザー名+パスワード+モード選択）----
 	loginForm(rid, room, preNb) {
 		this.view = { t: 'login', rid };
+		this.pendingClaim = null; // v2.23 §50: 前回スキャン残骸の使い回し防止
+		this._pendKey = null;
 		Vw.rc(this.main);
 		const f = Vw.add(this.main, 'form', { class: 'ir-frm' }); // v2.15 §42: 実 form（ブラウザパスワードマネージャ検知）
 		Vw.add(f, 'h3').textContent = t('btn.login');
@@ -651,15 +735,60 @@ export class RoomApp {
 			radios[m] = r;
 			Vw.add(lb, 'span').textContent = t(key);
 		}
-		{ // v2.22 §49: 選択したモードの状況説明文をボタンの下に表示
-			const say = Vw.add(f, 'div', { class: 'ir-modesay ir-mut' }),
-				paintSay = () => {
-					const m = Object.keys(radios).find(x => radios[x].checked) || 'normal';
-					say.textContent = t('mode.say.' + m);
-					say.dataset.mode = m;
-				};
-			for (const m of Object.keys(radios)) Vw.ael(radios[m], 'change', paintSay);
-			paintSay();
+		// v2.22 §49: 選択したモードの状況説明文 + v2.23 §50: 前回モード記憶の自動選択（onJoinScan からも呼ぶので関数スコープ const）
+		const say = Vw.add(f, 'div', { class: 'ir-modesay ir-mut' }),
+			paintSay = () => {
+				const m = Object.keys(radios).find(x => radios[x].checked) || 'normal';
+				say.textContent = t('mode.say.' + m);
+				say.dataset.mode = m;
+			},
+			applySel = nbK => {
+				const MO = (AppSettings.cfg && AppSettings.cfg.MODE) || {}; // v2.23 §50: setNested はネスト構造（MODE.<rid> は cfg.MODE[rid]、'MODE.nb.' は cfg.MODE.nb[nb]）
+				let m = (rid && MO[rid]) || (nbK && MO.nb && MO.nb[nbK]) || ''; // 部屋 rid の記憶が最優先、次に nameB64U 記憶。v2.23 fix: 記憶なしは現在選択に触れない（手動 radio 選択が名前入力で消えるのを防止）
+				const srvOk = !!(room && (room.srvOn === true || room.srvOn === 'true'));
+				if (m && radios[m] && !(m === 'server' && !srvOk)) for (const mm of Object.keys(radios)) radios[mm].checked = mm === m; // radios が有効モードの定義そのもの（MODES は room_session のローカル）
+				paintSay();
+			};
+		for (const m of Object.keys(radios)) Vw.ael(radios[m], 'change', paintSay);
+		applySel((room && room.nm) || preNb || this.pendingNb || (nmIn.value.trim() ? RoomApp.nb(nmIn.value.trim()) : ''));
+		Vw.ael(nmIn, 'input', () => applySel(RoomApp.nb(nmIn.value.trim()) || '')); // 部屋名入力に追従
+		{ // v2.23 §50: 作成者秘密鍵ファイル（添付してログイン→移譲取得）。
+		  // 常時 input[type=file] を置くと「部屋が開いた」判定セレクタ（テスト/他 UI）と衝突するため、
+		  // ボタン押下時のみ file input を生成する段階開示にする
+			const keyRow = Vw.add(f, 'div', { class: 'ir-remline' }),
+				kb = Vw.btn(keyRow, { class: 'ir-btn', type: 'button' });
+			Vw.sT(kb, t('btn.key.pick'));
+			const tip = Vw.add(keyRow, 'span', { class: 'ir-mut' });
+			Vw.click(kb, () => {
+				if (keyRow.querySelector('input[type=file]')) return;
+				tip.textContent = t('lbl.key.file');
+				const keyIn = Vw.ipt(keyRow, { type: 'file', name: 'ir-key', accept: '.json,application/json' });
+				Vw.ael(keyIn, 'change', () => {
+				const fl = keyIn.files && keyIn.files[0];
+				if (!fl) {
+					this._pendKey = null;
+					return;
+				}
+				fl.text().then(txt => {
+					let o = null;
+					try {
+						o = JSON.parse(txt);
+					} catch (e) {
+						o = null;
+					}
+					if (!o || !o.claim || !o.privJwk) {
+						Toast(t('msg.key.bad'));
+						keyIn.value = '';
+						this._pendKey = null;
+						return;
+					}
+					this._pendKey = txt;
+				}, () => {
+					Toast(t('msg.key.bad'));
+					keyIn.value = '';
+				});
+			});
+			}); // Vw.click(kb) 終端
 		}
 		const row = Vw.div(f, { class: 'ir-row' });
 		const go = Vw.btn(row, { class: 'ir-btn', type: 'button' }); // v2.15 §42: 全ボタン type=button + form submit で Enter 対応
@@ -685,7 +814,7 @@ export class RoomApp {
 		}; // v2.22 §49: doLogin 関数化（submit 単一入口）
 		const sc = Vw.btn(row, { class: 'ir-btn', type: 'button' }); // QR スキャン（§5.4 カメラ→PNG→ペースト縮退）
 		Vw.sT(sc, t('btn.scan'));
-		Vw.click(sc, () => this.scanFlow(d => {
+		const onJoinScan = d => { // v2.23 §50: パスワード QR は読取成功時点でそのままログイン（アンカー同様にクレーム検証/自機一致チェック）
 			const u = qrUnpack(d);
 			if (!u) {
 				Toast(t('msg.qr.verify.fail'));
@@ -694,7 +823,19 @@ export class RoomApp {
 			nmIn.value = RoomApp.unB64(u.nameB64U) || u.nameB64U;
 			pwIn.value = u.pw;
 			this.pendingNb = u.nameB64U; // QR が正 → room.json の nm より QR を優先
-		}));
+			this.pendingClaim = u.claim || null; // pack v2 のクレーム → openRoom で署名再計算・一致チェック
+			if (!uidIn.value.trim()) {
+				const ll = RoomApp.rememberOn() ? RoomApp.lastLogin() : null;
+				if (ll && ll.uid) uidIn.value = ll.uid; // 記憶 UID で自動ログイン
+			}
+			applySel(u.nameB64U); // 記憶モード自動選択（QR の部屋名で）
+			if (u.pw && uidIn.value.trim()) {
+				Toast(t('msg.qr.auto'));
+				f.requestSubmit();
+			} else if (u.pw) Toast(t('msg.qr.nouid')); // UID 未入力のみ人手に委ねる
+		};
+		this._onScanJoin = onJoinScan; // テストフック
+		Vw.click(sc, () => this.scanFlow(onJoinScan));
 		if (room && room.conflict) Vw.add(f, 'div', { class: 'ir-mut' }).textContent = t('msg.creator.otherAdmin'); // §6.9
 		if (room && rl) { // §5.1 別 uid 再ログインはログアウト後
 			Vw.add(f, 'div', { class: 'ir-mut' }).textContent = t('msg.session.mirror') + ' uid: ' + rl.uid;
@@ -738,10 +879,16 @@ export class RoomApp {
 		} else {
 			AppSettings.setNested('MODE.' + rid, mode).catch(e => ef(e, 'room_app.mode'));
 			this.usageDirty();
+			AppSettings.setNested('MODE.nb.' + (ctx.nb || nb || ''), mode).catch(e => ef(e, 'room_app.modeNb')); // v2.23 §50: 部屋名(nm b64U)単位のモード記憶（ログイン画面の自動選択用）
 			if (RoomApp.rememberOn()) { // v2.22 §49: 記憶 ON のログイン成功で 部屋名+ログイン名 を localStorage へ
 				try {
 					localStorage.setItem(RoomApp.REM_LAST, JSON.stringify({ nm: RoomApp.unB64((room && room.nm) || nb) || RoomApp.unB64(nb) || '', uid }));
 				} catch (e) { /* localStorage 不可は無視 */ }
+			}
+			if (this._pendKey) { // v2.23 §50: 鍵ファイル添付ログイン → 移譲（失敗時は通常参加のまま）
+				const kd = this._pendKey;
+				this._pendKey = null;
+				await this._adoptKey(ctx, kd).catch(e => ef(e, 'room_app.adoptKey'));
 			}
 		}
 	}
@@ -782,8 +929,9 @@ export class RoomApp {
 		const pwIn = Vw.ipt(f, { type: 'text', name: 'ir-cpw', placeholder: t('lbl.password'), autocomplete: 'new-password' });
 		// v2.3 §27: 最終作成値（LS）を初期値に。部屋名には yyyy-mm-dd-hh-mm-ss を追加（既存同形式は置換）。名前無ければ names からランダム
 		const last = await this.lastDef();
-		if (last && last.nm) nmIn.value = this.withTs(last.nm);
-		uidIn.value = (last && last.uid) || this.rndName();
+		// v2.23 §50: 入力が始まっていたら上書きしない（lastDef の遅延解決でユーザー/自動化の入力を消すレース対策）
+		if (last && last.nm && !nmIn.value.trim()) nmIn.value = this.withTs(last.nm);
+		if (!uidIn.value) uidIn.value = (last && last.uid) || this.rndName();
 		const mxRow = Vw.div(f, { class: 'ir-row' }); // 追加仕様: 単一画像上限（既定 10MB・作成時に変更可）
 		Vw.add(mxRow, 'span', { class: 'ir-mut' }).textContent = t('lbl.maxmb');
 		const mxIn = Vw.ipt(mxRow, { type: 'number', name: 'ir-cmx', min: '1', max: '200', step: '1' });
@@ -1197,7 +1345,7 @@ export class RoomApp {
 			return it;
 		};
 		ctx.setItems = () => {
-			if (ctx.cal) ctx.cal.setItems(ctx.collection.roomItems().map(ctx.attachThumb));
+			if (ctx.cal) ctx.cal.setItems(ctx.collection.roomItems().map(c => ctx.collection.viewEnrich(c)).map(ctx.attachThumb)); // v2.24 §51
 		};
 		ctx._ingests = []; // M からの meta 取り込み（§9.4: 未所持でも meta は全員で共有→表示・sync 対象）
 		ctx._ingestMeta = async e => {
@@ -1301,6 +1449,15 @@ export class RoomApp {
 				ctx.warned = true;
 				Toast(t(lw.type === 'xorig' ? 'msg.xorig.mismatch' : 'msg.conflict.blocked'));
 			}
+		});
+		ctx.session.on('cr', pl => { // v2.23 §50: 作成者移譲の受信反映（ヘッダバッジ/サブタブの作り直し）
+			if (ctx._crInfo) {
+				ctx._crInfo.cr = pl.cr;
+				ctx._crInfo.self = ctx.room.cr === ctx.uid;
+			}
+			this.paintCr(ctx);
+			this.renderRoom(rid);
+			Toast(t('msg.key.crchanged'));
 		});
 		ctx.session.on('conflict', () => { // §6.9 部屋再作成
 			this.forcedMsg = 'msg.conflict.blocked';
@@ -1494,11 +1651,18 @@ export class RoomApp {
 		};
 		const calHost = Vw.div(zone, {});
 		if (!ctx.cal) {
-			ctx.cal = new RoomCalendar({ parent: calHost, cfg: this.cfg, collection: ctx.collection, slices: { slicesOf: (u, i) => ctx.sheet.slicesOf(u, i) }, transfer: ctx.transfer, img: { bodyOf: h10 => this.bodyOf(h10) }, keep: ctx.mode === 'keep', afterBody: (h10, ab) => this.keepAdopt(ctx, h10, ab) });
+			ctx.cal = new RoomCalendar({ parent: calHost, cfg: this.cfg, collection: ctx.collection, slices: { slicesOf: (u, i) => ctx.sheet.slicesOf(u, i) }, transfer: ctx.transfer, img: { bodyOf: h10 => this.bodyOf(h10) }, keep: ctx.mode === 'keep', afterBody: (h10, ab) => this.keepAdopt(ctx, h10, ab),
+				// v2.24 §51: 表示トグル/列設定の永続（ブラウザ保存・全部屋共通）と表示設定ダイアログ
+			onCfg: (k, v) => {
+					this.cfg[k] = v;
+					AppSettings.setNested(k, v).catch(e => ef(e, `room_app.cfgPersist.${k}`));
+				},
+				onCfgDlg: () => this.viewCfgForm()
+			});
 			ctx.cal.online = () => { const s = ctx.session && ctx.session.state; return !!(s && s.online && s.authed); }; // v2.21 §48: 接続断で fetch 禁止（表示は OPFS 実在分のみ）
 			ctx.cal.sc.max = ctx.mode === 'server' ? (this.cfg.SRV_SCACHE_MAX || 8) : (this.cfg.SCACHE_MAX || 64); // サーバーモード低メモリ化 v1.3
 			ctx.cal.onBody = (h10, blob) => this.viewer(h10, blob); // §5.4 ビューア橋渡し
-			ctx.cal.setMode(this.cfg.CAL_VIEW || 'month');
+			if (!ctx.cal.listOn) ctx.cal.setMode(this.cfg.CAL_VIEW || 'month'); // v2.24 §51: 復元されたリストモードを踏まない
 		} else calHost.appendChild(ctx.cal.root);
 		ctx.setItems();
 		ctx.cal.refresh();
@@ -2253,10 +2417,41 @@ export class RoomApp {
 		draw();
 	}
 	// ---- 作成者メニュー（§5.2: QR 表示/DL・パスワード再発行・oa 管理・srvOn 切替・退室）----
+	// v2.24 §51: 表示設定（リスト形式のうちどの要素を表示するか。ブラウザ保存・全部屋共通）
+	viewCfgForm() {
+		const box = this.dlg(t('btn.vcfg'));
+		Vw.add(box, 'div', { class: 'ir-mut' }).textContent = t('lbl.vcfg.cols');
+		const cur = { ...RoomCalendar.LIST_DEF, ...(this.cfg.LIST_COLS || {}) };
+		for (const k of RoomCalendar.LIST_KEYS) {
+			const row = Vw.div(box, { class: 'ir-row' }),
+				lb = Vw.add(row, 'label', { class: 'ir-remline' }),
+				i = Vw.ipt(lb, { type: 'checkbox', name: 'chk-lc-' + k });
+			i.checked = cur[k] !== 0 && cur[k] !== false;
+			Vw.add(lb, 'span').textContent = t('col.' + k);
+			Vw.ael(i, 'change', () => {
+				this.cfg.LIST_COLS = { ...(this.cfg.LIST_COLS || {}), [k]: i.checked };
+				AppSettings.setNested(`LIST_COLS.${k}`, i.checked).catch(e => {
+					this.cfg.LIST_COLS = { ...this.cfg.LIST_COLS, [k]: !i.checked }; // v2.22 §49 方式: 楽観的メモリは失敗時に戻す
+					i.checked = !i.checked;
+					ef(e, `room_app.cfgPersist.LC.${k}`);
+					Toast(t('err.persist'));
+				});
+				const a = this.activeCtx();
+				if (a && a.cal) a.cal.setCols(this.cfg.LIST_COLS);
+			});
+		}
+	}
+
 	roomMenu() {
 		const ctx = this.activeCtx();
 		if (!ctx || ctx.room.cr !== ctx.uid) return; // 作成者本人のみ（§5.3/§6.2）
 		const box = this.dlg(t('btn.room.menu'));
+		{ // v2.23 §50: 秘密鍵ダウンロード（作成者のみ。他端末のログインフォームへアップロードして移譲）
+			const kR = Vw.div(box, { class: 'ir-row' }),
+				kb = Vw.btn(kR, { class: 'ir-btn' });
+			Vw.sT(kb, t('btn.key.dl'));
+			Vw.click(kb, () => this._keyDl(ctx).catch(e => ef(e, 'room_app.keyDl')));
+		}
 		// QR（§6.4: 生成→検証→PNG DL。平文 pw は作成/再発行後のセッション中のみ保持）
 		let qrBox = null; // v1.9 §23: QR 欄はメニュー末尾（QR とその情報の下に要素を置かない）
 		const mkQr = () => {
@@ -2373,6 +2568,10 @@ export class RoomApp {
 			oa: ctx.room.oa || [],
 			mx: +ctx.room.mx || 0, // 追加仕様: 単一画像上限（bytes）
 		};
+		if (ctx._delSig) { // v2.23 §50: 作成者移譲の証明（旧鍵署名）。移譲直後の初 C 一回だけ同封
+			o.del = ctx._delSig;
+			delete ctx._delSig;
+		}
 		try {
 			ctx.session.sendFrame(Protocol.mk('C', o));
 		} catch (e) {

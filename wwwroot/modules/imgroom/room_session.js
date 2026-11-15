@@ -813,7 +813,18 @@ export class RoomSession {
 		}));
 	}
 	// ---- C: 部屋設定通知（§8.3 整合 / §6.6 xorig / §6.8 srvOn / §6.9 再作成競合）----
-	_onC(p) {
+	// v2.23 §50: 移譲証明検証 — クレーム公開鍵で 'dlg:rid:新uid' 署名を確認（鍵を持つ者しか移譲を宣言できない）
+	async _verifyDel(p) {
+		try {
+			const pk = Y.U2u(this._claimPk),
+				pub = await crypto.subtle.importKey('spki', pk.buffer, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+			return await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pub, Y.U2u(p.del).buffer, Y.s2u('dlg:' + this.rid + ':' + p.cr).buffer);
+		} catch (e) {
+			ef(e, 'room_session.verifyDel');
+			return false;
+		}
+	}
+	async _onC(p) { // v2.23 §50: 移譲 del 検証のため async 化（最初の await まで同期実行は従来どおり）
 		if (p.rid && p.rid !== this.rid) return;
 		if (!(p.cg > (this.room.cg || 0))) return; // cg 古いは無視（§8.3）
 		if (!!p.xorig !== !!this.room.xorig) {
@@ -823,7 +834,10 @@ export class RoomSession {
 		// cr 未学習（新規参加者の初 C）ならそのまま採用。cr 既知で不一致のみ §6.9 競合扱い
 		if (!this.room.cr && p.cr) this.room.cr = p.cr;
 		const sameCr = (p.cr || '') === (this.room.cr || '');
-		if (!sameCr) {
+		if (!sameCr && p.del && this._claimPk && await this._verifyDel(p)) { // v2.23 §50: 旧作成者鍵で署名された移譲 C は競合でなく採用
+			this.room.cr = p.cr;
+			this._emit('cr', { cr: p.cr });
+		} else if (!sameCr) {
 			this._cDiff = T;
 			if (this._st.authed) {
 				// §6.9 参加中の再作成検知: cr 異なる C → 強制ログアウト+conflict 保存（自動再参加禁止）

@@ -912,3 +912,27 @@ input[type="file"]:active::file-selector-button {
 	margin: 6px 0;
 	cursor: pointer;
 }
+
+/* ==== v2.24 §51: リスト表示モード / トグルスイッチ / タグバッジ ==== */
+.ir-sw { position: relative; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; margin-left: 8px; }
+.ir-sw input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.ir-swtrack { flex: 0 0 auto; width: 32px; height: 17px; border-radius: 9px; background: #9a9a9a; position: relative; transition: background .15s; }
+.ir-swtrack::after { content: ''; position: absolute; left: 2px; top: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.ir-sw input:checked + .ir-swtrack { background: #1e8e47; }
+.ir-sw input:checked + .ir-swtrack::after { transform: translateX(15px); }
+.ir-sw input:focus-visible + .ir-swtrack { outline: 2px solid #1c86ee; outline-offset: 2px; }
+.ir-calbar.ir-lhide .ir-calmode, .ir-calbar.ir-lhide .ir-cpick { display: none; }
+.cal-list { align-items: stretch; }
+.ir-lcols { margin-left: 8px; font-size: .78em; font-weight: normal; color: var(--ir-mut); }
+.ir-lrow { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 96px; box-sizing: border-box; padding: 4px 6px; border-bottom: 1px solid rgba(125,125,125,.22); width: 100%; }
+.ir-lrow .ir-thumb { margin: 0; cursor: pointer; }
+.ir-lcell { flex: 0 0 auto; min-width: 0; overflow: hidden; }
+.ir-lc-nm { flex: 1 1 140px; white-space: nowrap; text-overflow: ellipsis; }
+.ir-lc-uid { flex: 0 0 96px; white-space: nowrap; text-overflow: ellipsis; }
+.ir-lc-dt { flex: 0 0 92px; font-variant-numeric: tabular-nums; }
+.ir-lc-tg { flex: 1 1 120px; display: flex; gap: 4px; flex-wrap: wrap; }
+.ir-lc-hs { flex: 0 0 auto; max-width: 240px; font-family: ui-monospace, monospace; font-size: .78em; color: var(--ir-mut); white-space: nowrap; text-overflow: ellipsis; }
+.ir-tgl { display: inline-block; background: rgba(96,130,170,.16); border: 1px solid rgba(96,130,170,.4); font-size: .8em; padding: 0 5px; border-radius: 7px; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.ir-thumb { position: relative; }
+.ir-tgline { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 2px; justify-content: center; align-items: center; flex-wrap: wrap; pointer-events: none; }
+.ir-tgb { background: rgba(18,38,58,.74); color: #fff; font-size: 9px; line-height: 1.35; padding: 0 4px; border-radius: 6px; max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

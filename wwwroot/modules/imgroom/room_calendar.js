@@ -18,12 +18,17 @@ import { CFG } from './ir_const.js';
 
 const PROG_CLS = 'ir-prog'; // 取得中サムネイルのクラス（onProgress 照合用）
 const GRAY_CLS = 'ir-gray'; // §5.5 全保持者不参加（allDeparted）
-const MODES = ['day', 'week', 'month'];
+const MODES = ['day', 'week', 'month']; // v2.24 §51: list はこれとは別のトグル（CalView の 4 番目モード）
+const LIST_ROW_H = 96; // list 行高さ（CSS .ir-lrow と一致）
+const LIST_TH_H = 84; // list サムネイル一辺（CSS .ir-lth と一致）
 const USER_PRIO = 10; // ユーザー操作 prio（自動同期=0 より高、§8.6）
 const WIN_PAD_PX = 96; // 窓の先読み/後読み余白（スクロール対策）
 const PASS_MS = 80; // 窓再評価のスロットル
 
 export class RoomCalendar {
+	// v2.24 §51: リスト列（表示順固定: サムネイル・画像名・投稿者・投稿日・タグ・ハッシュ値）
+	static LIST_KEYS = ['th', 'nm', 'uid', 'dt', 'tg', 'hs'];
+	static LIST_DEF = { th: 1, nm: 1, uid: 1, dt: 1, tg: 1, hs: 1 };
 	/**
 	 * new RoomCalendar({ parent, cfg, collection, slices, transfer, img })
 	 * slices: SheetRoom.slicesOf(uid, idx) -> Promise<Blob[]>
@@ -31,7 +36,7 @@ export class RoomCalendar {
 	 * img: 任意。bodyOf(h10)->Promise<Blob|null>（thumb 索引なし項目の遅延生成用）
 	 * onBody: 設定可。fn(h10, blob) — サムネイルクリックで fetchBody 成功時に呼ぶ（ビューアは呼び出し側）
 	 */
-	constructor({ parent, cfg, collection, slices, transfer, img, keep, afterBody } = {}) {
+	constructor({ parent, cfg, collection, slices, transfer, img, keep, afterBody, onCfg, onCfgDlg } = {}) { // v2.24 §51: onCfg/onCfgDlg 追加
 		this.cfg = { ...CFG, ...(cfg || {}) };
 		this.col = collection || null;
 		this.sl = slices || null;
@@ -44,6 +49,12 @@ export class RoomCalendar {
 
 		this.items = []; // 生 items（setItems で差し替え）
 		this.md = 'month'; // 既定: 月
+		// v2.24 §51: 表示トグル（ブラウザ保存・全部屋共通の cfg から復元）
+		this.listOn = this.cfg.LIST_VIEW === true;
+		this.badgeOn = this.cfg.TAG_BADGES === true;
+		this.cols = { ...RoomCalendar.LIST_DEF, ...(this.cfg.LIST_COLS || {}) };
+		this.onCfg = typeof onCfg === 'function' ? onCfg : null;
+		this.onCfgDlg = typeof onCfgDlg === 'function' ? onCfgDlg : null;
 		this.progs = new Map(); // h10 -> ratio(0..1)。窓外でも保持し再描画時反映
 		this.mounts = new Map(); // mount id -> wrap el（renderItem で生成済みの窓内項目）
 		this.seq = 0;
@@ -75,6 +86,21 @@ export class RoomCalendar {
 		this.pickBtn = Vw.btn(this.bar, { class: 'ir-cpick', type: 'button' }); // modeTabsBottom の ir-calmode 個数検査を壊さないよう別クラス
 		Vw.sT(this.pickBtn, '\ud83d\udcc5 ' + I18N.t('btn.cal.pick'));
 		Vw.click(this.pickBtn, () => this.pickPanel());
+		// v2.24 §51: トグルスイッチ（リスト表示/タグバッジ）と表示設定ボタン
+		this.swL = this._mkSwitch('btn.list', this.listOn, v => {
+			this.setListMode(v);
+			if (this.onCfg) this.onCfg('LIST_VIEW', v);
+		});
+		this.swT = this._mkSwitch('btn.badge', this.badgeOn, v => {
+			this.setBadge(v);
+			if (this.onCfg) this.onCfg('TAG_BADGES', v);
+		});
+		this.cfgBtn = Vw.btn(this.bar, { class: 'ir-vcfg', type: 'button' });
+		Vw.sT(this.cfgBtn, '\ud83d\udc41 ' + I18N.t('btn.vcfg'));
+		Vw.click(this.cfgBtn, () => {
+			if (this.onCfgDlg) this.onCfgDlg();
+		});
+		if (this.listOn) Vw.tC(this.bar, 'ir-lhide', true);
 		this.calBox = Vw.div(this.root, { class: 'ir-calbox' });
 		this.mkCal();
 		// 言語切替（I18N.onChange は RoomApp 等の所有者。グローバル上書きせず
@@ -85,7 +111,9 @@ export class RoomCalendar {
 		// CalView: 時刻降順ページ窓（月=1 月/週=1 週/日=1 日）。renderItem は窓内項目のみ呼ばれる
 		this.cal = new CalView({
 			parent: this.calBox,
-			mode: this.md,
+			mode: this.listOn ? 'list' : this.md, // v2.24 §51
+			headNote: () => this.colNote(),
+			lrowH: LIST_ROW_H,
 			items: this.view(),
 			winPages: this.cfg.CAL_WINDOW_PAGES,
 			cellPx: this.cfg.THUMB_PX + 24,
@@ -166,6 +194,12 @@ export class RoomCalendar {
 
 	setMode(m) {
 		if (this.dead || !MODES.includes(m)) return;
+		if (this.listOn) { // v2.24 §51: 日/週/月選択はリストモード解除（スイッチ連動・保存）
+			this.listOn = false;
+			if (this.swL) this.swL.checked = false;
+			Vw.tC(this.bar, 'ir-lhide', false);
+			if (this.onCfg) this.onCfg('LIST_VIEW', false);
+		}
 		this.md = m;
 		for (const [k, b] of this._modeBtns) Vw.tC(b, 'on', k === m); // .ir-calmode.on（CSS）
 		if (this.cal) this.cal.setMode(m);
@@ -194,7 +228,7 @@ export class RoomCalendar {
 	refresh() {
 		if (this.dead) return;
 		if (this.cal) this.cal.refresh();
-		for (const el of this.mounts.values()) if (el.isConnected) { this.paintGray(el); this.paintProg(el); }
+		for (const t of this._thumbsOf()) { this.paintGray(t); this.paintProg(t); } // v2.24 §51: list 行は内側サムネイルへ
 		this.schedulePass();
 	}
 
@@ -246,14 +280,22 @@ export class RoomCalendar {
 		if (!box) return;
 		const bb = box.getBoundingClientRect();
 		for (const [id, el] of this.mounts) {
-			if (!el.isConnected) { this.releaseThumb(el); this.mounts.delete(id); continue; }
-			const r = el.getBoundingClientRect();
-			if (r.bottom > bb.top - WIN_PAD_PX && r.top < bb.bottom + WIN_PAD_PX) this.buildThumb(el);
-			else this.releaseThumb(el);
+			// v2.24 §51: list ではマウント＝行。内側の .ir-thumb（_irc 保持）を実体化/解放する
+			const tEl = el._irc ? el : el.querySelector ? el.querySelector('.ir-thumb') : null;
+			if (!el.isConnected) {
+				if (tEl && tEl._irc) this.releaseThumb(tEl);
+				this.mounts.delete(id);
+				continue;
+			}
+			if (!tEl || !tEl._irc) continue;
+			const r = tEl.getBoundingClientRect();
+			if (r.bottom > bb.top - WIN_PAD_PX && r.top < bb.bottom + WIN_PAD_PX) this.buildThumb(tEl);
+			else this.releaseThumb(tEl);
 		}
 	}
 
 	renderItem(it) {
+		if (this.listOn) return this.renderListRow(it); // v2.24 §51: リスト行
 		// CalView のページ窓内項目のみ呼ばれる。placeholder div（THUMB_PX 高）を返し、
 		// winPass が可視項目だけ img を実体化する。
 		const el = Vw.div(null, { class: 'ir-thumb', 'data-h10': it.h10 }); // 寸法は --ir-thumb（room_app が設定値から注入）
@@ -265,8 +307,126 @@ export class RoomCalendar {
 			// 画像クリック→fetchBody→Blob 返却（objectURL・ビューアは呼び出し側。onBody に橋渡し）
 			this.fetchBody(it.h10).then(b => { if (b && typeof this.onBody === 'function') this.onBody(it.h10, b); });
 		});
+		if (this.badgeOn) this.paintBadges(el); // v2.24 §51: サムネイル下のタグバッジ
 		this.schedulePass();
 		return el;
+	}
+
+	// ---- v2.24 §51: リスト表示モード（画像のみモードとは別のトグル）----
+	setListMode(on) {
+		on = !!on;
+		if (this.dead || on === !!this.listOn) return;
+		this.listOn = on;
+		if (this.swL) this.swL.checked = on;
+		Vw.tC(this.bar, 'ir-lhide', on); // リスト中は日/週/月・ピックアップを隠す
+		if (this.cal) this.cal.setMode(on ? 'list' : this.md);
+		for (const [k, b] of this._modeBtns) Vw.tC(b, 'on', !on && k === this.md);
+		this.bindScroll();
+		this.schedulePass();
+	}
+	setBadge(on) {
+		on = !!on;
+		if (this.dead || on === !!this.badgeOn) return;
+		this.badgeOn = on;
+		if (this.swT) this.swT.checked = on;
+		for (const t of this._thumbsOf()) this.paintBadges(t); // v2.24 §51: list 行でも内側サムネイル
+		this.schedulePass();
+	}
+	setCols(cols) {
+		this.cols = { ...RoomCalendar.LIST_DEF, ...(cols || {}) };
+		if (this.dead) return;
+		if (this.listOn && this.cal) {
+			this.cal.setItems(this.view()); // 行 DOM 再構築（新しい列構成で renderItem 再実行）
+			this.bindScroll();
+			this.schedulePass();
+		}
+	}
+	// v2.24 §51: mounts（list では行）から _irc を持つサムネイル要素を解決
+	_thumbsOf() {
+		const out = [];
+		for (const el of this.mounts.values()) {
+			if (!el.isConnected) continue;
+			const t = el._irc ? el : el.querySelector ? el.querySelector('.ir-thumb') : null;
+			if (t && t._irc) out.push(t);
+		}
+		return out;
+	}
+	listCols() {
+		const c = this.cols || RoomCalendar.LIST_DEF;
+		return RoomCalendar.LIST_KEYS.filter(k => c[k] !== 0 && c[k] !== false);
+	}
+	colNote() {
+		return this.listCols().map(k => I18N.t('col.' + k)).join(' ');
+	}
+	paintBadges(el) {
+		const r = el._irc;
+		if (!r) return;
+		if (r.tgEl) {
+			Vw.rm(r.tgEl);
+			r.tgEl = null;
+		}
+		if (!this.badgeOn) return;
+		const tg = r.it.tg || (r.it.meta && r.it.meta.tg) || [];
+		if (!tg.length) return;
+		const ln = Vw.add(el, 'div', { class: 'ir-tgline' });
+		for (const g of tg.slice(0, 4)) {
+			const b = Vw.add(ln, 'span', { class: 'ir-tgb', text: g });
+			b.title = g;
+		}
+		if (tg.length > 4) Vw.add(ln, 'span', { class: 'ir-tgb', text: '+' + (tg.length - 4) });
+		r.tgEl = ln;
+	}
+	renderListRow(it) {
+		const row = Vw.div(null, { class: 'ir-lrow', 'data-h10': it.h10, 'data-ts': String(it.ts || 0) });
+		const m = it.meta || {},
+			cols = this.listCols();
+		if (cols.includes('th')) {
+			const th = Vw.add(row, 'div', { class: 'ir-thumb ir-lth', 'data-h10': it.h10 });
+			th._irc = { it, key: null, img: null, prog: null, badge: null, built: false, tgEl: null };
+			Vw.sS(th, { width: `${LIST_TH_H}px`, height: `${LIST_TH_H}px` });
+			Vw.click(th, () => {
+				this.fetchBody(it.h10).then(b => {
+					if (b && typeof this.onBody === 'function') this.onBody(it.h10, b);
+				});
+			});
+			this.paintGray(th);
+			this.paintProg(th);
+		}
+		if (cols.includes('nm')) {
+			const nm = it.nmP || '',
+				e = Vw.add(row, 'span', { class: 'ir-lcell ir-lc-nm', text: nm });
+			e.title = nm;
+		}
+		if (cols.includes('uid')) Vw.add(row, 'span', { class: 'ir-lcell ir-lc-uid', text: String(it.uid || m.u || '') });
+		if (cols.includes('dt')) {
+			const t0 = Number(it.ts) || Number(m.ts) || 0,
+				d = new Date(t0),
+				nn = x => (x < 10 ? `0${x}` : `${x}`),
+				e = Vw.add(row, 'span', { class: 'ir-lcell ir-lc-dt', text: t0 ? `${nn(d.getHours())}:${nn(d.getMinutes())}:${nn(d.getSeconds())}` : '—' });
+			e.title = t0 ? String(t0) : '';
+		}
+		if (cols.includes('tg')) {
+			const e = Vw.add(row, 'div', { class: 'ir-lcell ir-lc-tg' });
+			for (const g of (it.tg || m.tg || []).slice(0, 8)) Vw.add(e, 'span', { class: 'ir-tgl', text: g });
+		}
+		if (cols.includes('hs')) {
+			const h = String(it.h10 || ''),
+				e = Vw.add(row, 'span', { class: 'ir-lcell ir-lc-hs', text: h });
+			e.title = h;
+		}
+		this.mounts.set(++this.seq, row);
+		this.schedulePass();
+		return row;
+	}
+	_mkSwitch(key, val, cb) {
+		const lb = Vw.add(this.bar, 'label', { class: 'ir-sw' }),
+			i = Vw.ipt(lb, { type: 'checkbox' });
+		i.checked = !!val;
+		i.dataset.sw = key;
+		Vw.add(lb, 'span', { class: 'ir-swtrack' });
+		Vw.add(lb, 'span', { class: 'ir-swtxt' }).textContent = I18N.t(key);
+		Vw.ael(i, 'change', () => cb(i.checked));
+		return i;
 	}
 
 	buildThumb(el) {
@@ -338,14 +498,14 @@ export class RoomCalendar {
 		const total = Number(m) || 0;
 		const ratio = total ? Math.max(0, Math.min(1, (Number(n) || 0) / total)) : 0;
 		this.progs.set(h10, ratio); // 窓外でも Map に保持
-		for (const el of this.mounts.values()) if (el.isConnected && el._irc.it.h10 === h10) this.paintProg(el);
+		for (const t of this._thumbsOf()) if (t._irc.it.h10 === h10) this.paintProg(t); // v2.24 §51: list 行対応
 	}
 
 	clearProg(h10) {
 		this.progs.delete(h10);
-		for (const el of this.mounts.values()) if (el.isConnected && el._irc.it.h10 === h10) {
-			el.classList.remove(PROG_CLS);
-			if (el._irc.prog) { Vw.rm(el._irc.prog.el); el._irc.prog = null; }
+		for (const t of this._thumbsOf()) if (t._irc.it.h10 === h10) { // v2.24 §51: list 行対応
+			t.classList.remove(PROG_CLS);
+			if (t._irc.prog) { Vw.rm(t._irc.prog.el); t._irc.prog = null; }
 		}
 	}
 
@@ -407,7 +567,7 @@ export class RoomCalendar {
 				if (this.dead) return null;
 				if (!ab) { Toast(I18N.t('msg.fetch.fail')); return null; } // 失敗: null + Toast
 				if (this.keep && this.afterBody) await Promise.resolve(this.afterBody(h10, ab)).catch(() => {}); // v2.13 §40: 永続化+manifest 採用（失敗は注入側でログ）
-				return new Blob([ab]); // transfer.fetch は ArrayBuffer 解決 → Blob 化
+				return new Blob([ab], { type: ImgProc.sniff(ab) || 'image/jpeg' }); // transfer.fetch は ArrayBuffer 解決（v2.23 §50: FF 対策で MIME スニッフ） → Blob 化
 			} catch (e) {
 				this.clearProg(h10);
 				if (!this.dead) Toast(I18N.t('msg.fetch.fail'));

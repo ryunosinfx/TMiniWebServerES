@@ -163,9 +163,11 @@ await snap('zip:after');
 				await p.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 20000 });
 				return;
 			}
-			await p.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 8000 }).catch(() => {});
+			// v2.23: ループ負荷で autoJoin 遅延時、card 参加ボタン→フォーム遷移の窓で click が空振りする。
+			// pw フィールド出現 or authed を先に待ってから押す（多重安全化）。
+			await p.waitForFunction(() => !!document.querySelector('input[name="ir-pw"]') || !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 25000 }).catch(() => {});
 			if (await p.evaluate(() => !!window.__IRAPP.activeCtx()?.session?.state.authed)) return;
-			await p.click('button:has-text("参加")', { timeout: 8000 });
+			if (!(await p.$('input[name="ir-pw"]'))) await p.locator('button:has-text("参加")').last().click({ timeout: 12000 });
 			await p.waitForSelector('input[name="ir-pw"]', { timeout: 15000 });
 		}
 		await p.fill('input[name="ir-nm"]', ROOM);
