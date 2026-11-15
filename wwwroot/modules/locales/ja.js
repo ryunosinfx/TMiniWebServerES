@@ -197,4 +197,7 @@ export default {
 	'col.tg': 'タグ',
 	'col.hs': 'ハッシュ値',
 	'err.persist': '保存に失敗しました',
+	'lbl.tfilter': 'タグで絞り込み',
+	'btn.tfilter.clear': '絞り込み解除',
+	'lbl.tfilter.n': '{n} 件表示',
 };

@@ -24,6 +24,7 @@ import { SheetRoom } from './sheet_room.js';
 import { SyncMode } from './sync_mode.js';
 import { BulkDL } from './bulk_dl.js';
 import { RoomCalendar } from './room_calendar.js';
+import { TagIndex } from './tag_index.js';
 
 const DAY = 86400000,
 	t = (k, p) => I18N.t(k, p);
@@ -31,6 +32,7 @@ const DAY = 86400000,
 export class RoomApp {
 	constructor() {
 		this.rooms = new Map(); // rid -> ctx（各部屋セッション一式）
+		this.tagIdx = new TagIndex(); // v2.25 §52: タグ↔ハッシュ索引（IndexedDB。参加/タグ変化で更新、消失時再構築）
 		this.active = ''; // アクティブタブ rid
 		this.cfg = { ...CFG }; // 既定+user_settings+URL クエリ上書き（GRID_*/CAL_VIEW のみ、§11）
 		this.store = null; // HashStore 全アプリ 1 個（bodies/meta は横断共有、§7.5）
@@ -573,6 +575,7 @@ export class RoomApp {
 			orphans = new Set([...hs].filter(h => !other.has(h))); // 孤児のみ物理削除（本体も meta も部屋間で共有されうる）
 		for (const h of orphans) await OPFS.rmf(HashStore.bp(h)).catch(e => ef(e, 'room_app.purgeBody'));
 		await this.store.delMetas(orphans).catch(e => ef(e, 'room_app.purgeMetas'));
+		this.tagIdx.dropRoom(rid).catch(e => ef(e, 'room_app.tagIdx.drop')); // v2.25 §52: 部屋削除で索引行も削除
 		try {
 			const rh = await OPFS.gDH(rid, await OPFS.gDHR('rooms', false)); // gDH(名前, 親ハンドル): 作成しない
 			if (rh) { // v2.23 §50: Firefox は remove({recursive:true}) 非対応 → entries() で手動再帰削除
@@ -1345,7 +1348,13 @@ export class RoomApp {
 			return it;
 		};
 		ctx.setItems = () => {
-			if (ctx.cal) ctx.cal.setItems(ctx.collection.roomItems().map(c => ctx.collection.viewEnrich(c)).map(ctx.attachThumb)); // v2.24 §51
+			if (ctx.cal) {
+				let its = ctx.collection.roomItems().map(c => ctx.collection.viewEnrich(c)).map(ctx.attachThumb); // v2.24 §51
+				if (ctx._tgHashes) its = its.filter(x => ctx._tgHashes.has(x.h10)); // v2.25 §52: タグ絞り込み（索引テーブル準拠）
+				ctx.cal.setItems(its);
+			}
+			if (ctx._tgSkip) ctx._tgSkip = false;
+			else this._tagSync(ctx); // v2.25 §52: タグテーブル更新（デバウンス。フィルタ適用由来はスキップ）
 		};
 		ctx._ingests = []; // M からの meta 取り込み（§9.4: 未所持でも meta は全員で共有→表示・sync 対象）
 		ctx._ingestMeta = async e => {
@@ -1649,6 +1658,9 @@ export class RoomApp {
 			if (ctx.cal) ctx.cal.setThumbPx(v);
 			if (this.opfsOk) AppSettings.set('THUMB_PX', v).catch(() => {}); // 永続（次回起動時も同サイズ）
 		};
+		// v2.25 §52: タグ絞り込み行（IndexedDB のタグ表に基づく。タグ無しでは非表示）
+		ctx.tfr = Vw.div(zone, { class: 'ir-tfilter' });
+		this._tagPaintFilter(ctx);
 		const calHost = Vw.div(zone, {});
 		if (!ctx.cal) {
 			ctx.cal = new RoomCalendar({ parent: calHost, cfg: this.cfg, collection: ctx.collection, slices: { slicesOf: (u, i) => ctx.sheet.slicesOf(u, i) }, transfer: ctx.transfer, img: { bodyOf: h10 => this.bodyOf(h10) }, keep: ctx.mode === 'keep', afterBody: (h10, ab) => this.keepAdopt(ctx, h10, ab),
@@ -2418,6 +2430,81 @@ export class RoomApp {
 	}
 	// ---- 作成者メニュー（§5.2: QR 表示/DL・パスワード再発行・oa 管理・srvOn 切替・退室）----
 	// v2.24 §51: 表示設定（リスト形式のうちどの要素を表示するか。ブラウザ保存・全部屋共通）
+	// v2.25 §52: 参加時・タグデータ取得/変更で IndexedDB のタグ↔ハッシュ表を更新（デバウンス）。
+	// 表が消えていても再構築される（TagIndex 側で open 失敗→deleteDatabase→store 再生成）。
+	_tagSync(ctx) {
+		if (this.dead || !ctx || !ctx.rid) return;
+		clearTimeout(ctx._tgT);
+		ctx._tgT = setTimeout(() => {
+			const items = ctx.collection.roomItems().map(c => ctx.collection.viewEnrich(c));
+			Promise.resolve()
+				.then(() => this.tagIdx.rebuild(ctx.rid, items))
+				.then(() => (ctx._tgSel && ctx._tgSel.size ? this._tagApply(ctx) : null))
+				.then(() => this._tagPaintFilter(ctx))
+				.catch(e => ef(e, `room_app.tagIdx.${ctx.rid}`));
+		}, 500);
+	}
+	async _tagApply(ctx) {
+		try {
+			ctx._tgHashes = await this.tagIdx.hashesForTags(ctx.rid, [...(ctx._tgSel || [])]);
+		} catch (e) {
+			ef(e, 'room_app.tagIdxQuery'); // 永続障害時のみインメモリmeta にフォールバック（§52）
+			ctx._tgHashes = this._tagHashesMem(ctx);
+		}
+		ctx._tgSkip = true;
+		ctx.setItems();
+	}
+	_tagHashesMem(ctx) {
+		const sel = [...(ctx._tgSel || [])];
+		if (!sel.length) return null;
+		const out = new Set();
+		for (const x of ctx.collection.roomItems()) {
+			for (const tg0 of (x.meta && x.meta.tg) || []) if (sel.includes(tg0)) { out.add(x.h10); break; }
+		}
+		return out;
+	}
+	_tagTagsMem(ctx) {
+		const m = new Map();
+		for (const x of ctx.collection.roomItems()) for (const tg0 of (x.meta && x.meta.tg) || []) m.set(tg0, (m.get(tg0) || 0) + 1);
+		return [...m.entries()].map(([tag, n]) => ({ tag, n })).sort((a, b) => b.n - a.n || (a.tag < b.tag ? -1 : 1));
+	}
+	_tagPaintFilter(ctx) {
+		if (!ctx.tfr || !ctx.tfr.isConnected) return Promise.resolve();
+		const fin = list => {
+			if (!ctx.tfr || !ctx.tfr.isConnected) return;
+			Vw.rc(ctx.tfr);
+			if (!list.length) return; // タグが一つも無い部屋は行自体を出さない
+			Vw.add(ctx.tfr, 'span', { class: 'ir-tflbl' }).textContent = t('lbl.tfilter');
+			for (const { tag, n } of list.slice(0, 30)) {
+				const b = Vw.btn(ctx.tfr, { class: 'ir-tfchip' + ((ctx._tgSel && ctx._tgSel.has(tag)) ? ' on' : ''), type: 'button' });
+				b.dataset.tag = tag;
+				Vw.sT(b, `${tag} (${n})`);
+				Vw.click(b, () => {
+					ctx._tgSel = ctx._tgSel || new Set();
+					if (ctx._tgSel.has(tag)) ctx._tgSel.delete(tag);
+					else ctx._tgSel.add(tag);
+					Promise.resolve(this._tagApply(ctx)).then(() => this._tagPaintFilter(ctx)).catch(e => ef(e, 'room_app.tagApply'));
+				});
+			}
+			if (ctx._tgSel && ctx._tgSel.size) {
+				const cl = Vw.btn(ctx.tfr, { class: 'ir-tfclr', type: 'button' });
+				Vw.sT(cl, t('btn.tfilter.clear'));
+				Vw.click(cl, () => {
+					ctx._tgSel = new Set();
+					Promise.resolve(this._tagApply(ctx)).then(() => this._tagPaintFilter(ctx)).catch(e => ef(e, 'room_app.tagClear'));
+				});
+				Vw.add(ctx.tfr, 'span', { class: 'ir-tfcnt', text: t('lbl.tfilter.n', { n: ctx.cal ? ctx.cal.items.length : 0 }) });
+			}
+		};
+		return Promise.resolve()
+			.then(() => this.tagIdx.tagsOfRoom(ctx.rid))
+			.then(fin)
+			.catch(e => {
+				ef(e, 'room_app.tagIdxList');
+				fin(this._tagTagsMem(ctx));
+			});
+	}
+
 	viewCfgForm() {
 		const box = this.dlg(t('btn.vcfg'));
 		Vw.add(box, 'div', { class: 'ir-mut' }).textContent = t('lbl.vcfg.cols');

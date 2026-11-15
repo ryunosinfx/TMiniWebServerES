@@ -197,4 +197,7 @@ export default {
 	'col.tg': 'Tags',
 	'col.hs': 'Hash',
 	'err.persist': 'Failed to save',
+	'lbl.tfilter': 'Filter by tag',
+	'btn.tfilter.clear': 'Clear filter',
+	'lbl.tfilter.n': '{n} shown',
 };

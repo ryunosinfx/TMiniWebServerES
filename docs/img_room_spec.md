@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.24
+- ステータス: ドラフト v2.25
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1518,3 +1518,27 @@ ponta 側を**強制再読込**したうえで再試行するとコンソール�
 - `LIST_VIEW`/`TAG_BADGES`/`LIST_COLS` は RoomCalendar 構築時（＝各部屋の renderRoom 初回）に cfg から復元。**renderRoom の `setMode(CAL_VIEW)` はリスト復元を上書きしてはいけない**（実際に list 復元が即解除されていた事案。`if (!ctx.cal.listOn)` で保護）。
 - 教訓: ① `this.mounts` の要素が行になったため、`_irc` を前提に mounts を走査する全経路（setProg/clearProg/refresh/setBadge）は `_thumbsOf()`（行→内側 `.ir-thumb` 解決）経由に統一。Firefox で `r.badge` 例外の実走査あり。② 共有 2 枚で同じ canvas 画素だと**同一ハッシュで manifest 重複排除**され「2 枚目がない」誤解を生む（repro は画素ランダム化）。③ 再ログイン（作成者ファストパス）はサーバ中継レースで一時的失敗しうるためテストは 1 回再試行ガード。
 - テスト（img-spec §51）: `l51DefOff`（既定 OFF 双方）/`l51Badge`/`l51Head`（フル日付ヘッダ＋列名厳密一致）/`l51Desc`（ts 降順）/`l51Cells`（6 列の実値）/`l51Thumb`（窓内実体化）/`l51ColsCfg`（tg,hs 非表示＋列名追随）/`l51Persist`（ログアウト→再ログインで list ON・hs 非表示・badge ON 復元）/`l51BadgeBack`。Firefox でも list51.mjs で同一フロー green。
+
+---
+
+## §52（v2.25 追加）: IndexedDB タグ索引とタグ絞り込み
+
+### 1. タグ↔画像ハッシュのテーブル（`tag_index.js` / TagIndex）
+- IndexedDB `imgroom_tagidx`（ver1）に object store `tags`、**keyPath `['rid','tag','h10']`**、索引 `rid`・`ridtag(['rid','tag'])`。
+- **更新時期**: 部屋参加時と、画像のタグデータ取得/変更時。実体は `ctx.setItems()` 経由の全経路（参加・M meta 取り込み・タグ編集・manifest 変化）で **デバウンス 500ms の当該部屋全行再構築**（rebuild）。→ 壊れていても次の sync で必ず復活する。
+- **壊れている場合の自己修復**: open/操作の失敗は `_heal`（接続破棄→DB ごと deleteDatabase→次回 open の onupgradeneeded で store 再生成→rebuild で行再投入）。`onversionchange` で接続を譲り再接続。ただし **DataError/SyntaxError/TypeError（キー誤用等のプログラミングエラー）では deleteDatabase しない**（実測: 2 部複合索引に 3 部レンジを食わせると空走査→誤 heal で表が消えた。索引キーは `[rid,tag]` なので絞り込みは `IDBKeyRange.only([rid,tag])`）。
+- IndexedDB が永続的に使えない環境（プライベートモード等）のみ、呼び出し側がインメモリ meta へフォールバック（フィルタは継続、表は使われない）。
+- 部屋削除（§48 `_purgeRoom`）では `dropRoom(rid)` で索引行も削除。
+
+### 2. タグ絞り込み UI
+- カレンダー上の行 `.ir-tfilter`（**タグが一つも無い部屋では非表示**）。部屋内の全タグをチップ化（`tag (個数)`、索引の `tagsOfRoom` から、個数降順・最大 30）。
+- チップは**複数選択 OR**（選択タグのいずれかを持つ画像のみ表示）。選択中は「絞り込み解除」ボタンと「N 件表示」。
+- 実データは**索引テーブル準拠**: `hashesForTags(rid, tags)`（ridtag 索引）で得たハッシュ集合を `ctx._tgHashes` にキャッシュし、`ctx.setItems` が `its.filter(x => ctx._tgHashes.has(x.h10))` を適用（画像のみモード／リストモード両方に追随）。フィルタ適用由来の setItems は `_tgSkip` で再同期ループを防ぐ。
+- フィルタは表示のみ（共有・一括 DL・ビューアの导航対象 collection 自体は変えない）。
+- 設定の永続化はしない（部屋滞在時のみ。次回は未フィルタ）。
+
+### 3. 教訓とテスト
+- 教訓①: **複合索引のレンジは索引キーの形に一致させる**（`['rid','tag']` 索引に `[rid,tag,IDBKeyRange.min()]` は不正キー扱いの例外→誤って破損ヒールを発動させデータを消した）。read 系エラーの heal は「データ消失と区別できない場合」限定。
+- 教訓②: DOM 検証は仮想窓の実体化待ち（`items.length` だけ先回りすると `.ir-thumb` 実体化前で不安定。spec §52 は DOM 件数込みの waitForFunction に統一）。
+- 教訓③: 再参加の authed 着信は負荷下で遅れる（§50 のサーバ中継レース）。テストは最大 3 試行（最終は部屋カードの ログイン 経由）。
+- テスト（img-spec §52）: `idbTbl`（`indexedDB.databases()` に DB + 行数 4）/`tfXx`（xx で 2 件＋件数表示）/`tfOr`（xx,yy で 3）/`tfClr`/`tfUpd`（タグ編集→索引更新→zz チップ出現）/`tfRejoin`+`tfRebuild`（deleteDatabase→ログアウト→再参加で再構築・絞り込み復旧）。Firefox では repro（tg52.mjs）で同一フロー＋リストモード追随（2 行）まで green。

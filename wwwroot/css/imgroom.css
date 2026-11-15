@@ -936,3 +936,12 @@ input[type="file"]:active::file-selector-button {
 .ir-thumb { position: relative; }
 .ir-tgline { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 2px; justify-content: center; align-items: center; flex-wrap: wrap; pointer-events: none; }
 .ir-tgb { background: rgba(18,38,58,.74); color: #fff; font-size: 9px; line-height: 1.35; padding: 0 4px; border-radius: 6px; max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ==== v2.25 §52: タグ絞り込み（IndexedDB 索引ベース） ==== */
+.ir-tfilter { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 4px 2px; }
+.ir-tfilter:empty { display: none; }
+.ir-tflbl { font-size: .85em; color: var(--ir-mut); }
+.ir-tfchip { border: 1px solid var(--ir-line, #8a8a8a); border-radius: 12px; padding: 1px 9px; font-size: .85em; background: transparent; cursor: pointer; color: inherit; }
+.ir-tfchip.on { background: #2b6cb0; border-color: #2b6cb0; color: #fff; }
+.ir-tfclr { border: none; background: none; color: var(--ir-mut); font-size: .8em; cursor: pointer; text-decoration: underline; }
+.ir-tfcnt { font-size: .8em; color: var(--ir-mut); margin-left: auto; }
