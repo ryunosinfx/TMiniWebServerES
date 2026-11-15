@@ -397,7 +397,10 @@ export class RoomCalendar {
 				e = Vw.add(row, 'span', { class: 'ir-lcell ir-lc-nm', text: nm });
 			e.title = nm;
 		}
-		if (cols.includes('uid')) Vw.add(row, 'span', { class: 'ir-lcell ir-lc-uid', text: String(it.uid || m.u || '') });
+		if (cols.includes('uid')) {
+			const uc = Vw.add(row, 'span', { class: 'ir-lcell ir-lc-uid', text: String(it.uid || m.u || '') });
+			if (it.mine) Vw.add(uc, 'span', { class: 'ir-lme', text: I18N.t('lbl.me') }); // v2.25: 投稿者が自分の表記
+		}
 		if (cols.includes('dt')) {
 			const t0 = Number(it.ts) || Number(m.ts) || 0,
 				d = new Date(t0),

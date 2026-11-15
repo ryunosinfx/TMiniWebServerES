@@ -200,4 +200,5 @@ export default {
 	'lbl.tfilter': 'Filter by tag',
 	'btn.tfilter.clear': 'Clear filter',
 	'lbl.tfilter.n': '{n} shown',
+	'lbl.me': ' (me)',
 };

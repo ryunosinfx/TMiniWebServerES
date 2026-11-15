@@ -285,7 +285,11 @@ export class CalView {
 	}
 	pgPx() {
 		// 全セクション共通の高さ: ヘッダ + cap 相当の行（flex 折返し）。超過分はセクション内スクロール
-		if (this.md === 'list') return HH + 4 + (this.cap > 0 ? this.cap : 36) * this.lrh; // v2.24 §51: 行固定高（cap 行分）
+		if (this.md === 'list') { // v2.24 §51 改: セクション高は実件数（最大セクション）に合わせる（cap を上限）。ヘッダ余白 10 込み
+			let mx = 0;
+			for (const b of this.bk || []) if ((b.v || []).length > mx) mx = b.v.length;
+			return HH + 10 + 4 + Math.max(1, Math.min(this.cap > 0 ? this.cap : 36, mx)) * this.lrh;
+		}
 		if (this.fPg) return this.fPg;
 		const ts = Math.max(24, this.ch - 24), // サムネイル一辺（cellPx=THUMB_PX+24 で RoomCalendar が渡す）
 			wpx = Math.max(120, (this.box && this.box.clientWidth) || 320) - 10,
@@ -319,6 +323,7 @@ export class CalView {
 			minHeight: `${HH - 4}px`,
 			lineHeight: `${HH - 4}px`,
 		}); // sticky/配色/コントラストは CSS .cal-ch（v1.8 §22）
+		if (this.md === 'list') hdEl.style.marginBottom = '10px'; // v2.25: ヘッダと表示領域の隙間 10px
 		hdEl.textContent = hd;
 		if (this.md === 'list' && this.hn) Vw.add(hdEl, 'span', { class: 'ir-lcols', text: this.hn() }); // v2.24 §51: 隣に列名（小・灰）
 		const ih = Vw.div(bl, {});

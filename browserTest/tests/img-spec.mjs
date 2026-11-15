@@ -86,7 +86,16 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	}));
 	ck('l51Head', /\d{4}\/\d{2}\/\d{2}/.test(i51.hd) && i51.note === 'サムネイル 画像名 投稿者 投稿日 タグ ハッシュ値', JSON.stringify(i51).slice(0, 120));
 	ck('l51Desc', i51.rows.length >= 2 && i51.rows[0].ts >= i51.rows[1].ts);
-	ck('l51Cells', i51.rows.length >= 2 && i51.rows[0].nm.endsWith('.png') && i51.rows[0].uid === 'LSU' && /\d{2}:\d{2}/.test(i51.rows[0].dt) && i51.rows[0].tg.includes('alpha') && /^[0-9A-Za-z_-]{16,}$/.test(i51.rows[0].hs));
+		ck('l51Cells', i51.rows.length >= 2 && i51.rows[0].nm.endsWith('.png') && i51.rows[0].uid.startsWith('LSU') && i51.rows[0].uid.includes('\uFF08\u81EA\u5206\uFF09') && /\d{2}:\d{2}/.test(i51.rows[0].dt) && i51.rows[0].tg.includes('alpha') && /^[0-9A-Za-z_-]{16,}$/.test(i51.rows[0].hs), JSON.stringify(i51.rows[0] && i51.rows[0].uid));
+	// v2.25: ヘッダーとリスト本文の隙間 10px 程度
+	ck('l51Gap', await L1.evaluate(() => {
+		const cell = document.querySelector('.cal-cell.cal-list');
+		if (!cell) return false;
+		const hd = cell.querySelector('.cal-ch'), r0 = cell.querySelector('.ir-lrow');
+		if (!hd || !r0) return false;
+		const gap = r0.getBoundingClientRect().top - hd.getBoundingClientRect().bottom;
+		return Math.abs(gap - 10) <= 3 && cell.getBoundingClientRect().height < 400;
+	}));
 	await L1.waitForFunction(() => !!document.querySelector('.ir-lrow .ir-lth img[src]'), null, { timeout: 15000 });
 	ck('l51Thumb', true);
 	// 表示設定: タグ/ハッシュ値を非表示（ブラウザ保存・全部屋共通）→ 列と列名が追随
@@ -100,8 +109,20 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	// 永続復元: ログアウト→再ログイン（リスト ON / hs,tg 非表示 / バッジ ON）
 	await L1.click('button:has-text("ログアウト")');
 	await L1.waitForTimeout(1500);
-	await L1.click('button:has-text("参加")');
-	await L1.waitForSelector('input[name="ir-nm"]', { timeout: 10000 });
+	await L1.goto(BASE + '/img_room.html'); // 端末 remember による autoJoin 復帰もありうる（v2.26 対応）
+	const authed51 = await L1.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 12000 }).then(() => true).catch(() => false);
+	console.log('autoJoin51:', authed51);
+	const joinOpen51 = async () => {
+		const jb = L1.locator('button:has-text("参加")');
+		if (await jb.count()) await jb.first().click();
+		else {
+			console.log('homeDbg51:', await L1.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 300)));
+			await L1.click('button:has-text("ログイン")'); // 作成者カード経由
+		}
+		await L1.waitForSelector('input[name="ir-nm"]', { timeout: 15000 });
+	};
+	if (!authed51) {
+	await joinOpen51();
 	const nb51 = Buffer.from(RID51.split('-').slice(1).join('-').replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
 	const login51 = async () => {
 		await L1.fill('input[name="ir-nm"]', nb51);
@@ -112,12 +133,10 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	};
 	await login51().catch(async () => {
 		await L1.waitForTimeout(2000); // サーバ中継レース（v2.23 §50 観察）耐性で 1 回再試行
-		if ((await L1.locator('input[name="ir-pw"]').count()) === 0) {
-			await L1.click('button:has-text("参加")');
-			await L1.waitForSelector('input[name="ir-nm"]', { timeout: 10000 });
-		}
+		if ((await L1.locator('input[name="ir-pw"]').count()) === 0) await joinOpen51();
 		await login51();
 	});
+	}
 	await L1.waitForFunction(() => document.querySelectorAll('.ir-lrow').length >= 2, null, { timeout: 15000 });
 	ck('l51Persist', (await L1.locator('.ir-lc-hs').count()) === 0 && await L1.evaluate(() => !!document.querySelector('input[data-sw="btn.badge"]').checked && document.querySelector('input[data-sw="btn.list"]').checked === true));
 	await L1.click('label.ir-sw:has(input[data-sw="btn.list"]) .ir-swtxt');
@@ -195,18 +214,22 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	}));
 	await M1.click('button:has-text("ログアウト")');
 	await M1.waitForTimeout(1500);
-	await M1.goto(BASE + '/img_room.html');
-	await M1.click('button:has-text("参加")');
-	await M1.waitForSelector('input[name="ir-nm"]', { timeout: 15000 });
+	await M1.goto(BASE + '/img_room.html'); // 端末 remember による autoJoin 復帰もありうる（v2.26 対応）
 	const nb52 = Buffer.from(RID52.split('-').slice(1).join('-').replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-	// 再参加: サーバ中継レース（v2.23 §50 観察）で authed 届出が遅れるため最大 3 試行（3 試目は部屋カードの ログイン 経由）
-	let ok52 = false;
-	for (let t52 = 0; t52 < 3 && !ok52; t52++) {
-		if ((await M1.locator('input[name="ir-pw"]').count()) === 0) {
-			if (t52 === 2) await M1.click('button:has-text("ログイン")');
-			else await M1.click('button:has-text("参加")');
-			await M1.waitForSelector('input[name="ir-nm"]', { timeout: 15000 });
+	const joinOpen52 = async () => {
+		const jb = M1.locator('button:has-text("参加")');
+		if (await jb.count()) await jb.first().click();
+		else {
+			console.log('homeDbg52:', await M1.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 300)));
+			await M1.click('button:has-text("ログイン")'); // 作成者カード経由（参加ボタン未描画時）
 		}
+		await M1.waitForSelector('input[name="ir-nm"]', { timeout: 15000 });
+	};
+	// 再参加: autoJoin 復帰なら成功。サーバ中継レース（v2.23 §50 観察）で authed 届出が遅れるため最大 3 試行
+	let ok52 = await M1.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 12000 }).then(() => true).catch(() => false);
+	console.log('autoJoin52:', ok52);
+	for (let t52 = 0; t52 < 3 && !ok52; t52++) {
+		if ((await M1.locator('input[name="ir-pw"]').count()) === 0) await joinOpen52();
 		await M1.fill('input[name="ir-nm"]', nb52);
 		await M1.fill('input[name="ir-uid"]', 'TGU');
 		await M1.fill('input[name="ir-pw"]', 'tg-pw');

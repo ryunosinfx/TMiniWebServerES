@@ -200,4 +200,5 @@ export default {
 	'lbl.tfilter': 'タグで絞り込み',
 	'btn.tfilter.clear': '絞り込み解除',
 	'lbl.tfilter.n': '{n} 件表示',
+	'lbl.me': '（自分）',
 };

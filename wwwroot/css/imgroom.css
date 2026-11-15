@@ -922,7 +922,8 @@ input[type="file"]:active::file-selector-button {
 .ir-sw input:checked + .ir-swtrack::after { transform: translateX(15px); }
 .ir-sw input:focus-visible + .ir-swtrack { outline: 2px solid #1c86ee; outline-offset: 2px; }
 .ir-calbar.ir-lhide .ir-calmode, .ir-calbar.ir-lhide .ir-cpick { display: none; }
-.cal-list { align-items: stretch; }
+.cal-list { flex: 1 1 100%; align-items: stretch; }
+.ir-lme { color: var(--ir-mut); font-size: .85em; margin-left: 5px; }
 .ir-lcols { margin-left: 8px; font-size: .78em; font-weight: normal; color: var(--ir-mut); }
 .ir-lrow { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 96px; box-sizing: border-box; padding: 4px 6px; border-bottom: 1px solid rgba(125,125,125,.22); width: 100%; }
 .ir-lrow .ir-thumb { margin: 0; cursor: pointer; }

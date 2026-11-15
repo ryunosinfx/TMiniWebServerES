@@ -307,6 +307,7 @@ new RoomApp() .boot() // window.onload から呼ぶ
 // _onScanJoin(pack)(テストフック __IRAPP._onScanJoin): nm/pw+pendingNb+pendingClaim+記憶 uid 自動記入
 //   +applySel。pw+uid なら Toast msg.qr.auto で requestSubmit 即ログイン(uid 欠如 msg.qr.nouid)。
 //   claim は _creatorFlow 合流(§47 と同一の再起算+鍵一致)+claim/<rid>.json 保存。
+// v2.26 §53: cal_view pgPx list=HH+10+4+min(cap,max(bk.v.length))*lrh（一律高さ維持）。pgEl list は hdEl.style.marginBottom='10px'。CSS .cal-list{flex:1 1 100%}・.ir-lme。room_calendar uid セルは it.mine で span.ir-lme=t('lbl.me')（ja （自分）/en ' (me)'）。テスト l51Gap・l51Cells の全角括弧は \uXXXX エスケープ。
 // v2.25 §52: TagIndex(wwwroot/modules/imgroom/tag_index.js)=IndexedDB imgroom_tagidx::tags keyPath['rid','tag','h10'] 索引 rid/ridtag。room_app.tagIdx が ctx.setItems 経由で参加/タグ変化をデバウンス500ms rebuild(全行再構築)=消失時自己修復。操作失敗は _heal(deleteDatabase→再生成)だが DataError/SyntaxError/TypeError では heal しない。絞り込み=hashesForTags(ridtag only([rid,tag]))→ctx._tgHashes→setItems filter。renderRoom の ctx.tfr(.ir-tfilter)+_tagPaintFilter、chip OR・_tgSkip でループ防止。_purgeRoom で dropRoom。IDB 不可時のみ _tagTagsMem/_tagHashesMem フォールバック。
 // v2.24 §51: RoomCalendar.setListMode/setBadge/setCols + _mkSwitch(cal.bar)。CalView md に 'list' 追加(日ユニット・headNote=列名ラベル・pgPx は lrh 固定高)。mounts の要素が行になりうるため _irc 走査は必ず _thumbsOf() 経由。items は collection.viewEnrich で ts/uid/nmP/tg 補強。cfg: LIST_VIEW/TAG_BADGES(既定 false)/LIST_COLS(既定全 1) は AppSettings.setNested でブラウザ保存・全部屋共通。renderRoom の setMode(CAL_VIEW) は !ctx.cal.listOn のときのみ。room_app.viewCfgForm() が chk-lc-<key> 6 種。
 // createForm 初期値(§27 lastDef+withTs)は **フィールド空のときのみ**適用(v2.23: 非同期解決後に入力を消すレース修正)。
