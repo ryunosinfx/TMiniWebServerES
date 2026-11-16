@@ -373,6 +373,10 @@ export class RoomApp {
 		Vw.click(e.bulk, () => this.bulkDl());
 		e.menu = Vw.btn(this.hd, { class: 'ir-btn' }); // 作成者メニュー §5.2
 		Vw.click(e.menu, () => this.roomMenu());
+		e.tgs = Vw.btn(this.hd, { class: 'ir-btn' }); // v2.27 §54: タグ同期（押した人に全参加者のタグ情報を収集）
+		Vw.click(e.tgs, () => this._tagSyncAsk(this.activeCtx()));
+		e.help = Vw.btn(this.hd, { class: 'ir-btn' }); // v2.27 §54: ヘルプ（アプリ名とバージョン）
+		Vw.click(e.help, () => this.helpForm());
 		e.logout = Vw.btn(this.hd, { class: 'ir-btn warn' }); // ログアウト
 		Vw.click(e.logout, () => this.logout(this.active));
 		this.lblHdr();
@@ -398,6 +402,12 @@ export class RoomApp {
 		e.menu.title = t('btn.room.menu');
 		e.menu.setAttribute('aria-label', t('btn.room.menu'));
 		Vw.sT(e.logout, t('btn.logout'));
+		Vw.sT(e.tgs, t('btn.tgsync')); // v2.27 §54
+		e.tgs.title = t('btn.tgsync');
+		e.tgs.setAttribute('aria-label', t('btn.tgsync'));
+		Vw.sT(e.help, '?');
+		e.help.title = t('btn.help');
+		e.help.setAttribute('aria-label', t('btn.help'));
 	}
 	setLang(v) { // §5.2: LANG 保存 + I18N 切替（onChange→redraw）
 		AppSettings.set('LANG', v).catch(e => ef(e, 'room_app.lang'));
@@ -450,7 +460,7 @@ export class RoomApp {
 		const disp = v => (v ? '' : 'none');
 		Vw.sS(e.modeWrap, { display: ctx && ctx.mode !== 'server' ? '' : 'none' });
 		if (e.modeSel) e.modeSel.value = ctx && ctx.mode !== 'server' ? ctx.mode : 'normal'; // v2.14 §41
-		for (const k of ['trash', 'bulk', 'logout']) Vw.sS(e[k], { display: ctx ? disp(true) : disp(false) });
+		for (const k of ['trash', 'bulk', 'logout', 'tgs']) Vw.sS(e[k], { display: ctx ? disp(true) : disp(false) });
 		Vw.sS(e.menu, { display: ctx && ctx.room.cr === ctx.uid ? '' : 'none' }); // 作成者のみ §5.3
 	}
 	activeCtx() {
@@ -1423,6 +1433,7 @@ export class RoomApp {
 					}, 1000 + Math.random() * 3000);
 			} else if (p.ir === IR.B) hk.onB(p, from);
 			else if (p.ir === IR.TG) this._onTG(ctx, p, from).catch(e => ef(e, 'room_app.TG')); // v2.19 §46
+			else if (p.ir === IR.TY) this._onTY(ctx, p).catch(e => ef(e, 'room_app.TY')); // v2.27 §54
 		};
 		// ---- セッションイベント（§12 Toast/強制ログアウト）----
 		ctx.session.on('open', () => {
@@ -2503,6 +2514,82 @@ export class RoomApp {
 				ef(e, 'room_app.tagIdxList');
 				fin(this._tagTagsMem(ctx));
 			});
+	}
+
+	// ---- v2.27 §54: タグ同期 — 押した人が全参加者からタグ情報のみ収集（画像本体は動かない）----
+	async _tagSyncAsk(ctx) {
+		if (!ctx || ctx._tgSyncBusy || !ctx.session.state.authed) return;
+		const uid = ctx.session.uid,
+			peers = (ctx.session.state.participants || []).filter(x => x && x.uid !== uid);
+		if (!peers.length) {
+			Toast(t('msg.tgsync.alone'));
+			return;
+		}
+		ctx._tgSyncBusy = true;
+		const id = 'y' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36),
+			got = new Map();
+		for (const pe of peers) got.set(pe.uid, { la: 0, v: new Map() });
+		ctx._tgPend = ctx._tgPend || new Map();
+		ctx._tgPend.set(id, got);
+		ctx.session.sendFrame(Protocol.mk(IR.TY, { k: 'q', id, uid }));
+		setTimeout(() => this._tgFinish(ctx, id), 6000); // 応答待ち上限（不達者はおとなしく見切り）
+	}
+	_tgFinish(ctx, id) {
+		const got = (ctx._tgPend || new Map()).get(id);
+		if (!got || got._fin) return;
+		got._fin = 1;
+		ctx._tgPend.delete(id);
+		let n = 0;
+		for (const e0 of got.values()) {
+			for (const [h, tg] of e0.v) n += this._tgMerge(ctx, h, tg);
+		}
+		ctx._tgSyncBusy = false;
+		Toast(t('msg.tgsync.done', { n }));
+	}
+	_tgMerge(ctx, h, tg) { // union 合成（既知のタグは保持・max16）。増加分を返す
+		const m = ctx.collection,
+			mm = (m.mget && m.mget(h)) || m.metas.get(h) || {};
+		if (!m.metas.has(h)) return 0; // 当該画像を持たない行は無視
+		const cur = mm.tg || [],
+			add = (tg || []).filter(x => !cur.includes(x));
+		if (!add.length) return 0;
+		m.setTags(h, cur.concat(add).slice(0, 16)).catch(e => ef(e, 'room_app.tgsyncSet'));
+		return add.length;
+	}
+	async _onTY(ctx, p) {
+		if (!ctx.session.state.authed) return;
+		if (p.k === 'q') { // 応答はタグ情報のみ（h10+tg）。150 件/断片
+			if (!p.uid || p.uid === ctx.session.uid) return;
+			const items = [];
+			for (const x of ctx.collection.roomItems()) {
+				const m0 = x.meta || ctx.collection.metas.get(x.h10) || {};
+				if ((m0.tg || []).length) items.push([x.h10, m0.tg]);
+			}
+			const CH = 150;
+			for (let s = 0; ; s++) {
+				const seg = items.slice(s * CH, (s + 1) * CH);
+				ctx.session.sendFrame(Protocol.mk(IR.TY, { k: 'a', to: p.uid, id: p.id, uid: ctx.session.uid, seq: s, la: seg.length < CH ? 1 : 0, v: seg }));
+				if (seg.length < CH) break;
+			}
+			return;
+		}
+		if (p.k === 'a' && p.to === ctx.session.uid) {
+			const got = (ctx._tgPend || new Map()).get(p.id);
+			if (!got || got._fin) return;
+			const from = p.uid || '';
+			if (!got.has(from)) return; // 招かれざる応答（他リクエスト）は無視
+			const e0 = got.get(from);
+			for (const [h, tg] of (p.v || [])) e0.v.set(h, tg);
+			if (p.la) e0.la = 1;
+			if ([...got.values()].every(x => x.la)) this._tgFinish(ctx, p.id);
+		}
+	}
+
+	// v2.27 §54: ヘルプ（当面はアプリ名とバージョン）
+	helpForm() {
+		const box = this.dlg(t('btn.help'));
+		Vw.add(box, 'div', { class: 'ir-helpname', text: IR.APP_NAME });
+		Vw.add(box, 'div', { class: 'ir-mut', text: t('lbl.help.ver') + ' ' + IR.APP_VER });
 	}
 
 	viewCfgForm() {

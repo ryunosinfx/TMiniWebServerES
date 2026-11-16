@@ -201,4 +201,9 @@ export default {
 	'btn.tfilter.clear': '絞り込み解除',
 	'lbl.tfilter.n': '{n} 件表示',
 	'lbl.me': '（自分）',
+	'btn.tgsync': 'タグ同期',
+	'msg.tgsync.done': '{n} 件のタグを参加者から収集しました',
+	'msg.tgsync.alone': '他の参加者がいません',
+	'btn.help': 'ヘルプ',
+	'lbl.help.ver': 'バージョン',
 };

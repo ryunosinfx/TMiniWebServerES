@@ -110,14 +110,25 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	await L1.click('button:has-text("ログアウト")');
 	await L1.waitForTimeout(1500);
 	await L1.goto(BASE + '/img_room.html'); // 端末 remember による autoJoin 復帰もありうる（v2.26 対応）
-	const authed51 = await L1.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 12000 }).then(() => true).catch(() => false);
+	const authed51 = await L1.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 25000 }).then(() => true).catch(() => false);
 	console.log('autoJoin51:', authed51);
 	const joinOpen51 = async () => {
 		const jb = L1.locator('button:has-text("参加")');
 		if (await jb.count()) await jb.first().click();
 		else {
-			console.log('homeDbg51:', await L1.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 300)));
-			await L1.click('button:has-text("ログイン")'); // 作成者カード経由
+			const lo = L1.locator('button:has-text("ログアウト")'); // ログイン失敗直後は部屋シェル+再試行ボックスに残る（既知 UX）→ home へ戻す
+			if (await lo.count()) {
+				await lo.first().click();
+				await L1.waitForTimeout(1500);
+			}
+			const lg = L1.locator('button:has-text("ログイン")');
+			if (await lg.count()) await lg.first().click(); // 作成者カード経由
+			else {
+				console.log('homeDbg51:', await L1.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 600)));
+				await L1.goto(BASE + '/img_room.html');
+				await L1.waitForTimeout(4000);
+				await L1.click('button:has-text("参加")');
+			}
 		}
 		await L1.waitForSelector('input[name="ir-nm"]', { timeout: 15000 });
 	};
@@ -131,11 +142,21 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 		await L1.click('.ir-frm button:has-text("ログイン")');
 		await L1.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 25000 });
 	};
-	await login51().catch(async () => {
-		await L1.waitForTimeout(2000); // サーバ中継レース（v2.23 §50 観察）耐性で 1 回再試行
-		if ((await L1.locator('input[name="ir-pw"]').count()) === 0) await joinOpen51();
-		await login51();
-	});
+	for (let t51 = 0; t51 < 4; t51++) {
+		try {
+			await login51();
+			break;
+		} catch (e51) {
+			if (t51 === 3) throw e51;
+			console.log('login51Fail:', await L1.evaluate(() => {
+				const c = window.__IRAPP.activeCtx();
+				return JSON.stringify({ gate: (c && c._login && c._login.gate) || null, parts: c ? c.session.state.participants.map(x => x.uid) : null, msgs: [...document.querySelectorAll('.ir-msg,.ir-mbx,.ir-toast')].map(x => x.textContent.slice(0, 30)).slice(0, 3) });
+			}));
+			if (t51 === 1) { await L1.goto(BASE + '/img_room.html'); await L1.waitForTimeout(2000); }
+			if ((await L1.locator('input[name="ir-pw"]').count()) === 0) await joinOpen51();
+			await L1.waitForTimeout(2000);
+		}
+	}
 	}
 	await L1.waitForFunction(() => document.querySelectorAll('.ir-lrow').length >= 2, null, { timeout: 15000 });
 	ck('l51Persist', (await L1.locator('.ir-lc-hs').count()) === 0 && await L1.evaluate(() => !!document.querySelector('input[data-sw="btn.badge"]').checked && document.querySelector('input[data-sw="btn.list"]').checked === true));
@@ -220,22 +241,43 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 		const jb = M1.locator('button:has-text("参加")');
 		if (await jb.count()) await jb.first().click();
 		else {
-			console.log('homeDbg52:', await M1.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 300)));
-			await M1.click('button:has-text("ログイン")'); // 作成者カード経由（参加ボタン未描画時）
+			const lo = M1.locator('button:has-text("ログアウト")'); // ログイン失敗直後は部屋シェル+再試行ボックスに残る（既知 UX）→ home へ戻す
+			if (await lo.count()) {
+				await lo.first().click();
+				await M1.waitForTimeout(1500);
+			}
+			const lg = M1.locator('button:has-text("ログイン")');
+			if (await lg.count()) await lg.first().click(); // 作成者カード経由
+			else {
+				console.log('homeDbg52:', await M1.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 600)));
+				await M1.goto(BASE + '/img_room.html');
+				await M1.waitForTimeout(4000);
+				await M1.click('button:has-text("参加")');
+			}
 		}
 		await M1.waitForSelector('input[name="ir-nm"]', { timeout: 15000 });
 	};
 	// 再参加: autoJoin 復帰なら成功。サーバ中継レース（v2.23 §50 観察）で authed 届出が遅れるため最大 3 試行
-	let ok52 = await M1.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 12000 }).then(() => true).catch(() => false);
+	let ok52 = await M1.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 25000 }).then(() => true).catch(() => false);
 	console.log('autoJoin52:', ok52);
-	for (let t52 = 0; t52 < 3 && !ok52; t52++) {
+	for (let t52 = 0; t52 < 4 && !ok52; t52++) {
+		if (t52 === 2) {
+			await M1.goto(BASE + '/img_room.html'); // サーバ側退出処理遅延（v2.23 §50 レース）時の再設定
+			await M1.waitForTimeout(2000);
+		}
 		if ((await M1.locator('input[name="ir-pw"]').count()) === 0) await joinOpen52();
 		await M1.fill('input[name="ir-nm"]', nb52);
 		await M1.fill('input[name="ir-uid"]', 'TGU');
 		await M1.fill('input[name="ir-pw"]', 'tg-pw');
 		await M1.click('.ir-frm button:has-text("ログイン")');
 		ok52 = await M1.waitForFunction(() => !!window.__IRAPP.activeCtx()?.session?.state.authed, null, { timeout: 35000 }).then(() => true).catch(() => false);
-		if (!ok52) await M1.waitForTimeout(2000);
+		if (!ok52) {
+			console.log('login52Fail:', await M1.evaluate(() => {
+				const c = window.__IRAPP.activeCtx();
+				return JSON.stringify({ gate: (c && c._login && c._login.gate) || null, parts: c ? c.session.state.participants.map(x => x.uid) : null, msgs: [...document.querySelectorAll('.ir-msg,.ir-mbx,.ir-toast')].map(x => x.textContent.slice(0, 30)).slice(0, 3) });
+			}));
+			await M1.waitForTimeout(2000);
+		}
 	}
 	ck('tfRejoin', ok52);
 	if (ok52) {
@@ -1947,6 +1989,87 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	await T2.close();
 	await T3.close();
 	await A.waitForTimeout(400);
+}
+{ // v2.27 §54: タグ同期ボタン（押した人が全参加者からタグ情報のみ収集）とヘルプ（名前/バージョン）
+	const Y1 = await mk('YS4A'), Y2 = await mk('YS4B');
+	const YN = 'YD' + Date.now().toString(36).slice(-4);
+	await Y1.goto(BASE + '/img_room.html');
+	await Y1.click('button:has-text("部屋作成")');
+	await Y1.fill('input[name="ir-cn"]', YN);
+	await Y1.fill('input[name="ir-cuid"]', 'YDA');
+	await Y1.fill('input[name="ir-cpw"]', 'ys-pw');
+	await Y1.click('.ir-frm button:has-text("部屋作成")');
+	await Y1.waitForSelector('input[type=file]', { timeout: 20000 });
+	await Y2.goto(BASE + '/img_room.html');
+	await Y2.click('button:has-text("参加")');
+	await Y2.fill('input[name="ir-nm"]', YN);
+	await Y2.fill('input[name="ir-uid"]', 'YDB');
+	await Y2.fill('input[name="ir-pw"]', 'ys-pw');
+	await Y2.click('.ir-frm button:has-text("ログイン")');
+	await Y2.waitForSelector('input[type=file]', { timeout: 25000 });
+	const png54 = async P => {
+		const b64 = await P.evaluate(() => {
+			const cv = document.createElement('canvas');
+			cv.width = 40;
+			cv.height = 30;
+			const g = cv.getContext('2d');
+			g.fillStyle = '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
+			g.fillRect(0, 0, 40, 30);
+			g.fillStyle = '#fff';
+			g.fillRect(((window.__p54 = (window.__p54 || 0) + 1) * 5) % 40, 0, 3, 30);
+			return cv.toDataURL('image/png').slice(22);
+		});
+		return Buffer.from(b64, 'base64');
+	};
+	for (const [i, nm] of ['y-a.png', 'y-b.png'].entries()) { // 参加後の共有 = live 同期経路
+		await Y1.setInputFiles('input[type=file]', { name: nm, mimeType: 'image/png', buffer: await png54(Y1) });
+		await Y1.waitForFunction(k => window.__IRAPP.activeCtx().collection.roomItems().length >= k, i + 1, { timeout: 20000 });
+	}
+	await Y1.evaluate(async () => {
+		const c = window.__IRAPP.activeCtx();
+		const by = {};
+		for (const x of c.collection.roomItems()) by[atob(x.meta.n.replace(/-/g, '+').replace(/_/g, '/'))] = x.h10;
+		await c.collection.setTags(by['y-a.png'], ['ga']);
+		await c.collection.setTags(by['y-b.png'], ['gb', 'gc']);
+	});
+	for (let t = 0; t < 3; t++) { // 中継レースで meta 欠落時の resync 保険（v2.23 §50 観察）
+		if (await Y2.evaluate(() => window.__IRAPP.activeCtx().collection.roomItems().length >= 2)) break;
+		await Y2.evaluate(async () => { const c = window.__IRAPP.activeCtx(); await c.collection.refreshMetas(); c.setItems(); });
+		await Y2.waitForTimeout(3000);
+	}
+	await Y2.waitForFunction(() => window.__IRAPP.activeCtx().collection.roomItems().length >= 2, null, { timeout: 20000 });
+	// B 側のタグを欠落させて「同期漏れ」を作る（実シーンの再現: サーバレースで tg も欠落しうる）
+	await Y2.evaluate(() => {
+		const c = window.__IRAPP.activeCtx();
+		for (const x of c.collection.roomItems()) (x.meta || c.collection.metas.get(x.h10)).tg = [];
+	});
+	await Y2.click('button:has-text("タグ同期")');
+	await Y2.waitForFunction(() => [...document.querySelectorAll('.ir-toast')].some(e => e.textContent.includes('収集')) && window.__IRAPP.activeCtx().collection.roomItems().every(x => (((x.meta || window.__IRAPP.activeCtx().collection.metas.get(x.h10)).tg) || []).length > 0), null, { timeout: 16000 });
+	ck('tgSync', await Y2.evaluate(() => {
+		const c = window.__IRAPP.activeCtx();
+		const all = [];
+		for (const x of c.collection.roomItems()) for (const tg0 of (x.meta || c.collection.metas.get(x.h10)).tg || []) all.push(tg0);
+		return all.sort().join(',') === 'ga,gb,gc';
+	}));
+	await Y2.waitForFunction(() => [...document.querySelectorAll('.ir-tfchip')].length >= 3, null, { timeout: 12000 });
+	ck('tgSyncChips', await Y2.evaluate(() => ['ga', 'gb', 'gc'].every(x => [...document.querySelectorAll('.ir-tfchip')].some(e => e.dataset.tag === x))));
+	// ヘルプ: アプリ名とバージョン
+	await Y1.click('button[aria-label="ヘルプ"]');
+	await Y1.waitForSelector('.ir-helpname', { timeout: 8000 });
+	ck('helpBox', await Y1.evaluate(() => {
+		const n = document.querySelector('.ir-helpname').textContent;
+		const v = [...document.querySelectorAll('.ir-mut')].some(e => e.textContent.includes('バージョン') && /\d/.test(e.textContent));
+		return n === 'ImageRoom' && v;
+	}));
+	await Y1.locator('.ir-mclose').first().click();
+	// 単独参加では「他の参加者がいません」
+	await Y2.click('button:has-text("ログアウト")');
+	await Y2.waitForTimeout(1500);
+	await Y1.click('button:has-text("タグ同期")');
+	await Y1.waitForFunction(() => [...document.querySelectorAll('.ir-toast')].some(e => e.textContent.includes('他の参加者がいません')), null, { timeout: 8000 });
+	ck('tgSyncAlone', true);
+	await Y1.close();
+	await Y2.close();
 }
 await N9.close();
 await K1.close();

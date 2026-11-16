@@ -201,4 +201,9 @@ export default {
 	'btn.tfilter.clear': 'Clear filter',
 	'lbl.tfilter.n': '{n} shown',
 	'lbl.me': ' (me)',
+	'btn.tgsync': 'Sync tags',
+	'msg.tgsync.done': 'Collected {n} tags from participants',
+	'msg.tgsync.alone': 'No other participants',
+	'btn.help': 'Help',
+	'lbl.help.ver': 'Version',
 };

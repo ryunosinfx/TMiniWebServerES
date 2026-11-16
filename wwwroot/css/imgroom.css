@@ -946,3 +946,6 @@ input[type="file"]:active::file-selector-button {
 .ir-tfchip.on { background: #2b6cb0; border-color: #2b6cb0; color: #fff; }
 .ir-tfclr { border: none; background: none; color: var(--ir-mut); font-size: .8em; cursor: pointer; text-decoration: underline; }
 .ir-tfcnt { font-size: .8em; color: var(--ir-mut); margin-left: auto; }
+
+/* ==== v2.27 §54: ヘルプ・タグ同期 ==== */
+.ir-helpname { font-size: 1.2em; font-weight: 700; margin-bottom: 6px; }
