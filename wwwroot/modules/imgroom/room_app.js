@@ -827,7 +827,8 @@ export class RoomApp {
 		}; // v2.22 §49: doLogin 関数化（submit 単一入口）
 		const sc = Vw.btn(row, { class: 'ir-btn', type: 'button' }); // QR スキャン（§5.4 カメラ→PNG→ペースト縮退）
 		Vw.sT(sc, t('btn.scan'));
-		const onJoinScan = d => { // v2.23 §50: パスワード QR は読取成功時点でそのままログイン（アンカー同様にクレーム検証/自機一致チェック）
+		const onJoinScan = d => { // v2.23 §50: パスワード QR は読取成功時点でそのま
+			if (this._qrRedirect(d)) return; // v2.29 §56: 本アプリ URL の QR は確認ダイアログ→リダイレクトまログイン（アンカー同様にクレーム検証/自機一致チェック）
 			const u = qrUnpack(d);
 			if (!u) {
 				Toast(t('msg.qr.verify.fail'));
@@ -853,6 +854,21 @@ export class RoomApp {
 		if (room && rl) { // §5.1 別 uid 再ログインはログアウト後
 			Vw.add(f, 'div', { class: 'ir-mut' }).textContent = t('msg.session.mirror') + ' uid: ' + rl.uid;
 		}
+	}
+	// v2.29 §56: 本アプリ（…/img_room.html）URL の QR のみ confirm → リダイレクト。他 QR は通常処理
+	_qrRedirect(raw) {
+		const s = String(raw || '').trim();
+		let u;
+		try {
+			u = new URL(s);
+		} catch {
+			return false;
+		}
+		if (!/^https?:$/.test(u.protocol) || !/\/img_room\.html$/i.test(u.pathname)) return false;
+		if (!window.confirm(t('msg.qr.redirect') + '\n' + s)) return true; // 中止ならログイン処理に進まない
+		location.href = s;
+		if (u.pathname.replace(/^\/+/, '') === location.pathname.replace(/^\/+/, '')) location.reload(); // hash 差のみは再読込が必要
+		return true;
 	}
 	// rid 解決（部屋名 b64url → §7.3）
 	async ridOfNb(nb) {
@@ -1440,9 +1456,9 @@ export class RoomApp {
 			this.renderTabs();
 			if (ctx.cal) ctx.cal.refresh();
 		});
-		ctx.session.on('close', () => {
+		ctx.session.on('close', d => {
 			this.renderTabs();
-			Toast(t('msg.offline')); // §9.7 オフライン継続
+			Toast(t('msg.offline') + (d && d.unreach ? t('msg.ws.unreach') : '')); // §9.7 オフライン継続 / v2.29 §56: 接続不能は接尾
 		});
 		ctx.session.on('authOk', () => {
 			this.usageDirty();

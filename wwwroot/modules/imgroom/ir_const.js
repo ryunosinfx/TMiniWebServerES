@@ -54,7 +54,7 @@ export const CFG = {
 // フレーム種別（仕様 §8.2 表と一致）
 export const IR = {
 	APP_NAME: 'ImageRoom', // v2.27 §54: ヘルプ表示（アプリ名・バージョンは spec ステータスと同期して更新）
-	APP_VER: '2.27',
+	APP_VER: '2.29', // spec ステータス行と同期
 	W: 'W', // 参加要求（認証前可）
 	O: 'O', // 認証採決
 	C: 'C', // 部屋設定通知

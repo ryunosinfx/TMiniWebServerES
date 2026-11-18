@@ -308,6 +308,7 @@ export class RoomSession {
 		if (this.transfer && this.transfer.onNeedBody === N) this.transfer.onNeedBody = () => Promise.resolve(N);
 	}
 	_onWSOpen() {
+		this._everOnline = true; // v2.29 §56: 一度でも open した履歴（接続不能通知の判定）
 		this._wireTransfer(); // open 時に transfer 接続（受信 feed は onMessage 経由。onNeedBody 既定のみ注入）
 		this._st.online = T;
 		this._emit('open', N);
@@ -321,6 +322,11 @@ export class RoomSession {
 	_onWSClose(o) {
 		this._st.online = F;
 		if (o && o.intentional) return; // leave() 由来
+		if (!this._everOnline) { // v2.29 §56: 初回接続不能（open 履歴なし）→ 通知（WSClient の再試行連鎖は継続）
+			this._emit('close', { unreach: 1 });
+			this._snap();
+			return;
+		}
 		this._reauthPending = this._st.authed; // 認証済みセッションの予期せぬ切断 → open 時に再認証
 		this._emit('close', N);
 		this._snap();

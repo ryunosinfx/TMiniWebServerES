@@ -206,4 +206,6 @@ export default {
 	'msg.tgsync.alone': '他の参加者がいません',
 	'btn.help': 'ヘルプ',
 	'lbl.help.ver': 'バージョン',
+	'msg.ws.unreach': '（Websocketサーバーに接続不能）',
+	'msg.qr.redirect': 'リダイレクトしますが良いですか？',
 };

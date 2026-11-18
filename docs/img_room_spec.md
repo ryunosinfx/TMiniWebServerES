@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.27
+- ステータス: ドラフト v2.29
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1544,6 +1544,62 @@ ponta 側を**強制再読込**したうえで再試行するとコンソール�
 - テスト（img-spec §52）: `idbTbl`（`indexedDB.databases()` に DB + 行数 4）/`tfXx`（xx で 2 件＋件数表示）/`tfOr`（xx,yy で 3）/`tfClr`/`tfUpd`（タグ編集→索引更新→zz チップ出現）/`tfRejoin`+`tfRebuild`（deleteDatabase→ログアウト→再参加で再構築・絞り込み復旧）。Firefox では repro（tg52.mjs）で同一フロー＋リストモード追随（2 行）まで green。
 
 ---
+
+## §56（v2.29 追加）: WS 接続不能メッセージと URL QR リダイレクト確認
+
+### 要求
+- WebSocket サーバーに接続できない場合のメッセージに **（Websocketサーバーに接続不能）** を添える。
+- ログイン（参加）画面で **URL の QR コードを読み込んだら「リダイレクトしますが良いですか？」の confirm** を出し、OK ならその URL へリダイレクト。**本アプリの URL の QR のみ**対象。
+
+### 実装
+- **接続不能通知**: `room_session._onWSClose()` で `intentional`（leave() 由来）除外後、**open 履歴なし（`_everOnline` 偽）= 初回接続不能**なら `_emit('close', { unreach: 1 })` を発火（WSClient のバックオフ再接続連鎖は継続）。room_app の close ハンドラは `t('msg.offline') + (d.unreach ? t('msg.ws.unreach') : '')` をトースト。open 後の切断は従来どおり『オフラインモードです』のみ。ロケール `msg.ws.unreach` =「（Websocketサーバーに接続不能）」/ "(WebSocket server unreachable)"。
+- **QR リダイレクト**: `onJoinScan` 冒頭で `_qrRedirect(d)`。判定は `new URL()` 成功 + `http(s):` + **pathname が `img_room.html` 終端**（別オリジンの本アプリ URL も可、ランダム URL や `TMIWR1:` pack は対象外）。confirm『リダイレクトしますが良いですか？\n<URL>』→ OK で `location.href = s`、**パス同一で hash 差のみの場合は location.reload() が必要**（hashchange では join 画面が再構築されない）。中止（キャンセル）は true を返して以後のログイン処理に進ませない。
+- テスト（img-spec §56）: 接続不能は**接続設定（wsForm の `ir-wsb`）を死ポート `http://127.0.0.1:9443` に適用→部屋作成**で実経路再現。発火する console エラーは検証経路そのものなので `errors` から `"127.0.0.1:9443"` をフィルタ除外。URL QR はアプリ同一 QRTool で PNG 生成→scanFlow の file input で読取、OK/キャンセル/外部 URL の 3 経路を確認。
+
+### 教訓
+- **意図的に起こすエラー経路のテストは spec の errors ゲートから明示除外が必要**（ページ側 console 収集は全 error を拾う）。
+- patch スクリプトは**1 ファイル 1 スクリプト**（パス切替で s が混ざり room_session.js に room_app 内容を上書き事故。git checkout で復旧）。heredoc 内の `'\n'` は python 実改行化 → JS 文字列内で改行となり構文エラー。**r-string を使う**（v2.25 教訓の再発）。
+
+## §55（v2.28 追加）: ブラウザ拡張 imgroomCompanion（自動ログイン・毎日一括 DL・展開/重複排除/7 世代バックアップ）
+
+### 要求
+- `browserExtention/imgroomCompanion` に **Chromium/Firefox 互換**のブラウザ拡張を作成。
+- **ブラウザの定期リロード**と**パスワード QR コード・特定のユーザー名による自動ログイン**。
+- **毎日定時に一括 ZIP ダウンロード**し、内容を確認して**指定ディレクトリに展開**、**ハッシュ値による重複ファイル排除**。
+- **最大 7 世代の世代バックアップ**を各世代の指定ディレクトリへ**ファイルコピー**で実施。**削除までは同期しない**。
+
+### 構成と設計
+```
+browserExtention/imgroomCompanion/
+  manifest.json  MV3。background に service_worker と scripts を二重宣言（Chrome=SW / Firefox=イベントページ）。
+                 content_scripts 2 本: content.js(アイソレート) + bridge.js(world:"MAIN")。gecko.id 定義済み。
+  bg.js          ①定期リロード（reloadMin → tabs.reload）②定時 job（alarms は dailyAt 非対応 FF 対策で when 計算+毎回再 schedule）:
+                 部屋タブ確保→ensure-login→アプリ bulkDl() 実行→downloads API で ZIP 完了収集（idle 判定/上限分）→
+                 nativeMessaging.sendNativeMessage(hoスト)→lastReport/lastNote を storage に記録。
+  content.js     参加フォーム（ir-nm/ir-uid/ir-pw）の自動記入→ログイン。失敗直後の部屋シェル残留（§54 既知 UX）は
+                 ログアウト→ホーム復帰から再試行。部屋名は URL hash（#b64url）優先。bridge の state で authed 判定。
+  bridge.js      MAIN world で window.__IRAPP.bulkDl()/authed を postMessage で提供（CSP 安全・eval 不使用）。
+  options.html/js 設定 UI（type=module）。QR 画像（PNG 等）は**内蔵 jsQR**（`jsqr/jsQR.es.min.nosjis.js`＝アプリと同一ビルド。`await jsQR(data,w,h)` の nosjis 非同期形）で復号し Chrome/Firefox 共通（BarcodeDetector 非依存）。`TMIWR1:<部屋名b64url>:<パスワード>` を解釈し roomName/password へ。ホスト接続テスト/今すぐ実行。
+  native-host/host.mjs  Node≥18 依存なし。native messaging stdio（4 バイト長さ前置り JSON）+ --cli モード。
+                 ZIP は中央目录から解析（method 0/8=inflateRawSync、UTF-8 名）、`..`/絶対パス拒否、
+                 エントリは SHA-256 で現行・全世代照合し**内容重複は書かない**（.imgroom-hashcache.json 台帳）。
+                 展開後 extractDir→gen1→…→gen7 の連鎖で**存在しない/ハッシュ違いのファイルのみコピー**（削除の伝搬なし）。
+  native-host/install.mjs 登録マニフェスト（com.imgroom.companion.json）生成・配置（chrome/firefox・Linux/mac/Win 案内）。
+```
+- ダウンロードファイル名既定パターン `-\d{14}-\d{3}\.zip$`（BulkDL の `<部屋名>-YYYYMMDDHHMMSS-NNN.zip`）。
+- 拡張単体では任意ディレクトリへ書き込めないため、展開・重複排除・世代コピーはネイティブメッセージホスト（Node）が担う。**ブラウザと拡張、ホストの設定は options UI に一元化**。
+
+### 検証（browserTest/tests/ext-companion.mjs）
+この環境の chromium は headless shell のみ起動可能（full chrome は SIGTRAP、shell は拡張不可）なため、**3 層の等価検証**:
+A) 実アプリの一括 DL → playwright download → host.mjs runJob: written3→全件重複排除(0/dup3)→増分(1 件+7 世代 copied1/skipped3) ✓
+B) content.js+bridge.js を addInitScript（文字列版=CSP 非適用）で実アプリページに注入、chrome スタブ経由で自動ログイン→authed ✓
+C) bg.js を node で API スタブ注入、run-now job の orchestration（タブ確保→bulkdl→downloads 収集→hostAsk→lastReport/lastNote）✓
+D) QR PNG 復号: アプリ QRTool で生成した `TMIWR1:` QR を canvas→jsQR（同一ビルド）で完全復号。使用 API は createImageBitmap/canvas/getImageData/dynamic import のみで FF 互換 ✓
+実ブラウザ（ユーザー環境）でのアンパック読み込み手順は README。Firefox は 115+（MAIN world=128+）。
+
+### 教訓
+- `addInitScript` の**関数版は CSP の外**だが、その中で `eval` するとページ CSP が効く。**文字列版で直接ソース注入**が正解（content.js の等価実行に使用）。
+- 最小 MV3 拡張でも headless **shell** は `--load-extension` を無視する（ERR_ABORTED）。拡張 E2E は full chromium（この環境では SIGTRAP で不可）が必要。
 
 ## §54（v2.27 追加）: タグ同期ボタンとヘルプ
 

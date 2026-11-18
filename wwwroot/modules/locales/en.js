@@ -206,4 +206,6 @@ export default {
 	'msg.tgsync.alone': 'No other participants',
 	'btn.help': 'Help',
 	'lbl.help.ver': 'Version',
+	'msg.ws.unreach': '(WebSocket server unreachable)',
+	'msg.qr.redirect': 'Redirect to the scanned URL?',
 };
