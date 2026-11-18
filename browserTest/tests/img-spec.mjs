@@ -2071,6 +2071,92 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	await Y1.close();
 	await Y2.close();
 }
+{ // v2.29 §56: WS 接続不能メッセージと、本アプリ URL QR の確認→リダイレクト
+	const W = await mk('WS56');
+	await W.goto(BASE + '/img_room.html');
+	await W.click('button:has-text("接続設定")');
+	await W.waitForSelector('input[name="ir-wsb"]', { timeout: 8000 });
+	await W.fill('input[name="ir-wsb"]', 'http://127.0.0.1:9443'); // 接続不能ポート（即拒否）
+	await W.click('.ir-mbx button:has-text("適用")');
+	await W.locator('.ir-mclose').first().click();
+	await W.click('button:has-text("部屋作成")');
+	await W.fill('input[name="ir-cn"]', 'W56' + Date.now().toString(36).slice(-4));
+	await W.fill('input[name="ir-cuid"]', 'WSU');
+	await W.fill('input[name="ir-cpw"]', 'w56-pw');
+	await W.click('.ir-frm button:has-text("部屋作成")');
+	await W.waitForFunction(() => [...document.querySelectorAll('.ir-toast')].some(e => e.textContent.includes('\uFF08Websocket\u30B5\u30FC\u30D0\u30FC\u306B\u63A5\u7D9A\u4E0D\u80FD\uFF09')), null, { timeout: 15000 });
+	ck('wsUnreachToast', true);
+	await W.close();
+	// URL QR 生成（別ページ・アプリ同一の QRTool）
+	const mkQrPng = async P => {
+		const nb = Buffer.from('QD' + Date.now().toString(36).slice(-4), 'utf8').toString('base64url');
+		const png = await P.evaluate(async h => {
+			const { QRTool } = await import('/modules/qr_tool.js');
+			const r = await QRTool.make(location.origin + '/img_room.html#' + h, { size: 256, level: 'M', retry: 3 });
+			return r.failed ? null : r.canvas.toDataURL('image/png');
+		}, nb);
+		return { nb, png: png && Buffer.from(png.slice(22), 'base64') };
+	};
+	const G = await mk('QRG56');
+	await G.goto(BASE + '/img_room.html');
+	const qr1 = await mkQrPng(G);
+	await G.close();
+	// ① OK → リダイレクト
+	const R = await mk('QR56');
+	let dlg1 = '';
+	R.on('dialog', async d => { dlg1 = d.message(); await d.accept(); });
+	await R.goto(BASE + '/img_room.html');
+	await R.click('button:has-text("\u53C2\u52A0")');
+	await R.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 });
+	await R.click('.ir-frm button:has-text("QR \u30B9\u30AD\u30E3\u30F3")');
+	await R.waitForSelector('.ir-mdl input[type=file]', { timeout: 8000 });
+	await R.setInputFiles('.ir-mdl input[type=file]', { name: 'urlqr.png', mimeType: 'image/png', buffer: qr1.png });
+	await R.waitForFunction(h => decodeURIComponent(location.hash.replace(/^#/, '')).split(':')[0] === h, qr1.nb, { timeout: 12000 });
+	ck('qrRedirect', dlg1.includes('\u30EA\u30C0\u30A4\u30EC\u30AF\u30C8\u3057\u307E\u3059\u304C\u826F\u3044\u3067\u3059\u304B'));
+	ck('redirectJoinForm', await R.locator('.ir-frm input[name="ir-nm"]').count() === 1);
+	// ② キャンセル → リダイレクトしない
+	const R2 = await mk('QR56B');
+	let dlg2 = '';
+	R2.on('dialog', async d => { dlg2 = d.message(); await d.dismiss(); });
+	const G2 = await mk('QRG56C');
+	await G2.goto(BASE + '/img_room.html');
+	const qr2 = await mkQrPng(G2);
+	await G2.close();
+	await R2.goto(BASE + '/img_room.html');
+	await R2.click('button:has-text("\u53C2\u52A0")');
+	await R2.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 });
+	await R2.click('.ir-frm button:has-text("QR \u30B9\u30AD\u30E3\u30F3")');
+	await R2.waitForSelector('.ir-mdl input[type=file]', { timeout: 8000 });
+	await R2.setInputFiles('.ir-mdl input[type=file]', { name: 'urlqr.png', mimeType: 'image/png', buffer: qr2.png });
+	await R2.waitForTimeout(2500);
+	ck('qrCancel', dlg2.includes('\u30EA\u30C0\u30A4\u30EC\u30AF\u30C8') && !R2.url().includes('#' + qr2.nb.split('').join('')));
+	ck('cancelNoRedirect', await R2.evaluate(() => !location.hash.includes('%23') && !decodeURIComponent(location.hash).includes('QD') || location.hash === ''));
+	// ③ 非アプリ URL の QR → confirm 出さず従来（検証失敗）トースト
+	const R3 = await mk('QR56D');
+	let dlgCount3 = 0;
+	R3.on('dialog', async d => { dlgCount3++; await d.dismiss(); });
+	const G3 = await mk('QRG56E');
+	await G3.goto(BASE + '/img_room.html');
+	const foreign = await G3.evaluate(async () => {
+		const { QRTool } = await import('/modules/qr_tool.js');
+		const r = await QRTool.make('http://127.0.0.1:9443/random.png', { size: 256, level: 'M', retry: 3 });
+		return r.failed ? null : r.canvas.toDataURL('image/png');
+	});
+	await G3.close();
+	await R3.goto(BASE + '/img_room.html');
+	await R3.click('button:has-text("\u53C2\u52A0")');
+	await R3.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 });
+	await R3.click('.ir-frm button:has-text("QR \u30B9\u30AD\u30E3\u30F3")');
+	await R3.waitForSelector('.ir-mdl input[type=file]', { timeout: 8000 });
+	await R3.setInputFiles('.ir-mdl input[type=file]', { name: 'x.png', mimeType: 'image/png', buffer: Buffer.from(foreign.slice(22), 'base64') });
+	await R3.waitForTimeout(2500);
+	ck('foreignNoConfirm', dlgCount3 === 0 && await R3.evaluate(() => [...document.querySelectorAll('.ir-toast')].some(e => e.textContent.length > 0)));
+	await R.close();
+	await R2.close();
+	await R3.close();
+	// §56 意図的誘発: 死ポート 9443 への WebSocket 失敗ログは検証経路そのもの（非退行対象外）
+	for (let i = errors.length - 1; i >= 0; i--) if (errors[i].includes('127.0.0.1:9443')) errors.splice(i, 1);
+}
 await N9.close();
 await K1.close();
 

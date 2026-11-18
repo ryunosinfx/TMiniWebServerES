@@ -1,0 +1,35 @@
+{
+	"manifest_version": 3,
+	"name": "ImageRoom Companion",
+	"version": "1.0.1",
+	"description": "ImageRoom 部屋へ定時に自動ログインし、一括 ZIP ダウンロードを毎日実行。ネイティブホスト経由で展開・SHA-256 重複排除・最大7世代バックアップ（削除は同期しない）。",
+	"permissions": ["storage", "alarms", "downloads", "tabs", "nativeMessaging"],
+	"host_permissions": ["http://*/*", "https://*/*"],
+	"background": {
+		"service_worker": "bg.js",
+		"scripts": ["bg.js"]
+	},
+	"content_scripts": [
+		{
+			"matches": ["http://*/*img_room.html*", "https://*/*img_room.html*"],
+			"js": ["content.js"],
+			"run_at": "document_idle"
+		},
+		{
+			"matches": ["http://*/*img_room.html*", "https://*/*img_room.html*"],
+			"js": ["bridge.js"],
+			"world": "MAIN",
+			"run_at": "document_idle"
+		}
+	],
+	"options_ui": {
+		"page": "options.html",
+		"open_in_tab": true
+	},
+	"browser_specific_settings": {
+		"gecko": {
+			"id": "imgroom-companion@tminiweb.example",
+			"strict_min_version": "115.0"
+		}
+	}
+}

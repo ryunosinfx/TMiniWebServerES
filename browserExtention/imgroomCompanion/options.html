@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ImageRoom Companion 設定</title>
+<style>
+	body { font-family: system-ui, sans-serif; max-width: 820px; margin: 24px auto; padding: 0 12px; color: #222; }
+	h1 { font-size: 1.3em; } fieldset { margin: 14px 0; border: 1px solid #ccc; border-radius: 8px; padding: 10px 14px; }
+	legend { font-weight: 600; } label.row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+	label.row span { flex: 0 0 220px; }
+	input[type=text], input[type=password], input[type=time], input[type=number] { flex: 1; padding: 4px 6px; }
+	input.gen { width: 92%; }
+	button { padding: 6px 14px; margin-right: 8px; }
+	pre { background: #f4f4f4; padding: 8px; border-radius: 6px; white-space: pre-wrap; }
+	.note { color: #666; font-size: .85em; }
+	#qrimg { max-width: 220px; border: 1px dashed #999; display: none; }
+</style>
+</head>
+<body>
+<h1>ImageRoom Companion 設定</h1>
+<fieldset>
+	<legend>接続（自動ログイン）</legend>
+	<label class="row"><span>部屋の URL</span><input type="text" id="roomUrl" placeholder="http://192.168.1.10:8080/img_room.html#b64url"></label>
+	<label class="row"><span>ユーザー名</span><input type="text" id="userName"></label>
+	<label class="row"><span>パスワード</span><input type="password" id="password"></label>
+	<label class="row"><span>部屋名（URL hash 優先）</span><input type="text" id="roomName"></label>
+	<label class="row"><span><input type="checkbox" id="autoLogin"> 自動ログインする</span></label>
+	<div class="note">QR から取り込み: 下の「QR 画像」で PNG 等から復号します（内蔵 jsQR 使用で Chrome/Firefox 共通）。QR 生成元テキスト（TMIWR1:…）を直接貼ることもできます。</div>
+	<label class="row"><span>QR 画像</span><input type="file" id="qrfile" accept="image/*"></label>
+	<img id="qrimg" alt="QR プレビュー">
+	<label class="row"><span>TMIWR1: テキスト</span><input type="text" id="qrtext" placeholder="TMIWR1:<部屋名b64url>:<パスワード>"></label>
+	<button id="qrparse">QR/TMIWR1 を解釈</button>
+</fieldset>
+<fieldset>
+	<legend>定期実行</legend>
+	<label class="row"><span>定期リロード 分（0=無効）</span><input type="number" id="reloadMin" min="0" max="720"></label>
+	<label class="row"><span><input type="checkbox" id="dailyEnabled"> 毎日定時に一括 DL</span></label>
+	<label class="row"><span>定時（HH:MM）</span><input type="time" id="dailyTime"></label>
+	<label class="row"><span>DL 待ち上限 分</span><input type="number" id="dailyTimeoutMin" min="2" max="120"></label>
+	<label class="row"><span>ZIP ファイル名パターン (正規表現)</span><input type="text" id="zipPattern"></label>
+</fieldset>
+<fieldset>
+	<legend>展開と世代バックアップ（ネイティブホスト）</legend>
+	<label class="row"><span>ホスト ID</span><input type="text" id="hostId"></label>
+	<label class="row"><span>展開先ディレクトリ</span><input type="text" id="extractDir" placeholder="/home/you/images/current"></label>
+	<div class="genwrap"></div>
+	<div class="note">各世代は指定ディレクトリへ追加/更新コピーのみ（削除は同期しない）。SHA-256 で重複を排除。</div>
+	<button id="testhost">ホスト接続テスト</button>
+	<button id="runnow">今すぐ実行</button>
+</fieldset>
+<button id="save">保存</button> <span id="saved" class="note"></span>
+<fieldset>
+	<legend>状態</legend>
+	<pre id="status">—</pre>
+</fieldset>
+<script type="module" src="options.js"></script>
+</body>
+</html>
