@@ -208,4 +208,5 @@ export default {
 	'lbl.help.ver': 'Version',
 	'msg.ws.unreach': '(WebSocket server unreachable)',
 	'msg.qr.redirect': 'Redirect to the scanned URL?',
+	'btn.key.move': 'Move key (download)',
 };

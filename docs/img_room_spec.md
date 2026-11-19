@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.29
+- ステータス: ドラフト v2.30
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1544,6 +1544,29 @@ ponta 側を**強制再読込**したうえで再試行するとコンソール�
 - テスト（img-spec §52）: `idbTbl`（`indexedDB.databases()` に DB + 行数 4）/`tfXx`（xx で 2 件＋件数表示）/`tfOr`（xx,yy で 3）/`tfClr`/`tfUpd`（タグ編集→索引更新→zz チップ出現）/`tfRejoin`+`tfRebuild`（deleteDatabase→ログアウト→再参加で再構築・絞り込み復旧）。Firefox では repro（tg52.mjs）で同一フロー＋リストモード追随（2 行）まで green。
 
 ---
+
+## §57（v2.30 追加）: 作成者自認の厳格化・作成者設定ボタン・鍵移動ボタン・拡大ログインボタン
+
+### 要求
+- 「（本人・署名一致）」は **本人 uid でログインし、かつ OPFS 上の秘密鍵で署名を再計算して一致した場合だけ**表示（他端末での uid 一致だけでは出さない）。
+- 上記成立時だけ**作成者専用の部屋設定ボタン**を出現・操作可能にする。
+- **秘密鍵の移動ボタンをログイン画面の右下**に置く。
+- **ログインボタンを倍サイズ・明色**にする。
+
+### 実装
+- **`_crSelfCheck(ctx, roomClaim)` 厳格化**: ①OPFS 鍵（`keys/<rid>.json`）が存在 ②`鍵.uid === ログイン uid` ③**自機鍵の claim が部屋公式 claim と同一源**（pk/sg/ct が一致）④claim 署名の検証成立 + **秘密鍵で再計算した署名が claim の公開鍵で検証成功**（= 鍵がクレームと対）。**WebCrypto の ECDSA 署名はランダム k で非決定**なため `再計算署名 === claim.sg` のバイト一致では判定しない（再計算一致は検証ペアで保証）。
+- **公式 claim の周知**: `pushC` が `claim` 欄を追加 → 受信側 `room_session._onC` が `room.claim` へ保存 → `_creatorFlow` は `room.claim` 最優先で解決（従来は自機 `keys.claim` 基準だったため、**別端末で同部屋名を再作成して生成された無関係な鍵が self を成立させる穴**があった）。作成者は claim 確定時に C を即再配信し新規参加者へ周知。
+- **自認の遅到再評価**: `authOk`・`cr` 受信・`_creatorFlow` 末尾・`renderRoom`（partsEl 生成直後）の各所で `_paintSelf`（async）→ 厳格 self 判定 → `paintCr` + `syncHdr`。`_creatorFlow` 末尾の paintCr は active 問わず（未描画時は renderRoom 側が受ける）。
+- **部屋設定 ⚙️ ボタン**: `room.cr === uid && (!ctx._crInfo || ctx._crInfo.self)` で表示（claim 無きレガシー部屋は uid フォールバック）。
+- **秘密鍵の移動**: 参加（ログイン）フォームの末尾に `.ir-keyrow`（右寄せ flex）+ `btn.key.move`「秘密鍵の移動（ダウンロード）」→ 部屋 rid を解決して `_keyDl`（鍵が無い端末は msg.key.none トースト）。
+- **ログイン/部屋作成 submit**: クラス `ir-bigbtn`（font 1.9em・padding 増で体感約倍・明青 #4a9eff、hover #6fb4ff）。
+- テスト（img-spec §57）: 作成者端末はバッジ「（本人・署名一致）」+ ⚙️ 表示/開閉 + ログアウト後のログイン画面右下から**実ダウンロード**（imgroom-key-*.json）。鍵無し別 context で**URL+claim 経由**の同一 uid 参加 → バッジは「（署名一致）」のみ・⚙️ 非表示・logout で残骸除去。
+
+### 教訓
+- **日本語 escape は 1 文字ずつ検証** —「署」=U+7F72 を「签」U+7B91 と誤記すると waitForFunction/ck が永久不一致で無限タイムアウトに見える（症状: 表示済みなのに待機が成立しない）。
+- **同一 context を共有するテストで WSBASE 等の設定を書き換えたら必ず復元**（`ir-wsb` → サイト既定）。AppSettings 経由で後続全ページの boot に伝染する。
+- **playwright goto でハッシュのみ変化すると再読込されない**（boot 再走が必要なら明示 `reload()`）。
+- ページ内コンソール収集の接頭フィルタ（`DBG.cf` 等）は計測対象を漏らす（`DBG.*` に緩める）。
 
 ## §56（v2.29 追加）: WS 接続不能メッセージと URL QR リダイレクト確認
 

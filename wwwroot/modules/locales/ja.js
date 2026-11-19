@@ -208,4 +208,5 @@ export default {
 	'lbl.help.ver': 'バージョン',
 	'msg.ws.unreach': '（Websocketサーバーに接続不能）',
 	'msg.qr.redirect': 'リダイレクトしますが良いですか？',
+	'btn.key.move': '秘密鍵の移動（ダウンロード）',
 };

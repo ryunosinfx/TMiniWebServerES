@@ -949,3 +949,9 @@ input[type="file"]:active::file-selector-button {
 
 /* ==== v2.27 §54: ヘルプ・タグ同期 ==== */
 .ir-helpname { font-size: 1.2em; font-weight: 700; margin-bottom: 6px; }
+
+/* v2.30 §57: ログイン/作成 submit 拡大+明色、鍵移動は右下 */
+.ir-bigbtn { font-size: 1.9em; padding: 0.55em 1.5em; background: #4a9eff; border-color: #2f7fd1; color: #fff; }
+.ir-bigbtn:hover { background: #6fb4ff; border-color: #4a9eff; }
+.ir-keyrow { display: flex; justify-content: flex-end; margin-top: 8px; }
+.ir-keymv { font-size: 0.9em; }

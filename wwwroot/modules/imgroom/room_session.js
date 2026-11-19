@@ -861,6 +861,7 @@ export class RoomSession {
 			this._pwSalt = AuthChallenge.saltNormal();
 		}
 		this.room.cg = p.cg;
+		if (p.claim) this.room.claim = p.claim; // v2.30 §57: 作成者公式 claim の周知（self 判定の基準）
 		this.room.oa = p.oa || this.room.oa || [];
 		this.room.srvOn = p.srvOn === T || p.srvOn === true;
 		if (+p.mx > 0) this.room.mx = +p.mx; // 追加仕様: 部屋毎アップロード上限（作成者 C で配信）

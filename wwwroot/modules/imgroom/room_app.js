@@ -142,18 +142,22 @@ export class RoomApp {
 	}
 	// 署名再作成一致: 鍵所持者は署名を再作成し、元クレーム sg と新規署名の両方が公開鍵検証で一致 → 所持を証明＝部屋作成者認定
 	// （ECDSA は署名が非決定的なので**検証一致**で判定する。Byte 同一比較はしない）
-	async _crSelfCheck(ctx) {
+	async _crSelfCheck(ctx, roomClaim) { // v2.30 §57: 厳格化 — 自機鍵の claim が部屋公式 claim と同一源、
+		// OPFS 秘密鍵で再計算した署名が claim.sg と完全一致、かつログイン uid が鍵の作成者 uid 本人のときのみ true
 		const o = await this._crKeysLoad(ctx.rid);
 		if (!o || !o.privJwk || !o.json) return false;
+		if (o.uid !== ctx.uid) return false;
+		const kc = claimParse(o.claim);
+		const rc = claimParse(roomClaim || o.claim || '');
+		if (!kc || !rc || rc.pk !== kc.pk || rc.sg !== kc.sg || rc.ct !== kc.ct) return false;
 		try {
-			const c = claimParse(o.claim);
-			if (!c) return false;
+			const c = kc;
 			const priv = await crypto.subtle.importKey('jwk', o.privJwk, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']), // v2.23 §50: extractable（公開鍵 spki 再構成で claim.pk と照合するため）
 				pub = await crypto.subtle.importKey('spki', Y.U2u(c.pk), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']),
 				data = Y.s2u(o.json),
 				orig = await crypto.subtle.verify(RoomApp.CR_EC, pub, Y.U2u(c.sg), data),
 				fresh = await crypto.subtle.sign(RoomApp.CR_EC, priv, data),
-				re = await crypto.subtle.verify(RoomApp.CR_EC, pub, fresh, data);
+				re = await crypto.subtle.verify(RoomApp.CR_EC, pub, fresh, data); // 再計算署名が claim 公開鍵で検証可 = OPFS 秘密鍵が claim と対（ECDSA は非決定署名のためバイト一致では判定しない）
 			return orig && re;
 		} catch (e) {
 			ef(e, 'room_app.crSelfCheck');
@@ -251,7 +255,7 @@ export class RoomApp {
 		Toast(t('msg.key.adopt'));
 	}
 	async _creatorFlow(ctx) {
-		let claim = RoomApp.hashClaim() || this.pendingClaim || ''; // v2.23 §50: QR pack 経由クレーム（URL アンカーと同様に検証）
+		let claim = (ctx.room && ctx.room.claim) || RoomApp.hashClaim() || this.pendingClaim || ''; // v2.30 §57: 部屋公式 claim（C 配信）最優先
 		const keys = await this._crKeysLoad(ctx.rid);
 		if (!claim && keys && keys.claim) claim = keys.claim; // 自機が鍵を持つ=作成者自身。QR を経由しなくてもクレーム復元可
 		if (!claim) {
@@ -267,13 +271,27 @@ export class RoomApp {
 		ctx._crInfo = { claim, ok: v.ok, cr: v.cr || '', ct: (claimParse(claim) || {}).ct || 0, self: false };
 		if (ctx.session) ctx.session._claimPk = (claimParse(claim) || {}).pk || ''; // v2.23 §50: 移譲 C の del 検証用公開鍵
 		if (v.ok && !ctx.room.cr && v.cr) ctx.room.cr = v.cr; // 作成者不明状態の救済: 署名検証できたクレームから認識
-		if (keys && (await this._crSelfCheck(ctx))) { // 署名再作成一致 → この端末は作成者
+		if (v.ok && claim) ctx.room.claim = claim; // v2.30 §57: 検証済み公式 claim を部屋レコードへ（pushC で周知）
+		if (v.ok && claim && ctx.room.cr === ctx.uid) this.pushC(ctx).catch(e => ef(e, 'room_app.claimPush')); // v2.30 §57: 作成者は公式 claim 入り C を即再配信（新規参加者へ周知）
+		if (keys && (await this._crSelfCheck(ctx, claim))) { // v2.30 §57: 厳格一致でのみ self 認定
 			ctx._crInfo.self = true;
 			if (v.ok && ctx.room.cr !== ctx.uid && ctx._crInfo.cr === ctx.uid) ctx.room.cr = ctx.uid;
 			else if (!v.ok && ctx._crInfo.cr === ctx.uid) ctx.room.cr = ctx.uid;
 		}
 		if (claim && claim !== (keys && keys.claim)) await OPFS.w('claim/' + ctx.rid + '.json', Y.s2u(JSON.stringify({ claim, ts: Date.now() })).buffer).catch(() => {}); // アンカー由来は保存（次回以降も認識）
-		if (this.active === ctx.rid) this.paintCr(ctx);
+		this.paintCr(ctx); // v2.30 §57: active 問わず（partsEl 生成済みなら即描画。未生成時は renderRoom 側 paintCr が受ける）
+	}
+	_paintSelf(ctx) { // v2.30 §57: strict self 再評価（非同期）→ バッジ/ヘッダ再描画
+		(async () => {
+			const cl = (ctx.room && ctx.room.claim) || this._claimFor(ctx);
+			const s = ctx.room.cr === ctx.uid && !!(await this._crSelfCheck(ctx, cl));
+			if (ctx._crInfo) {
+				if (!ctx._crInfo.claim && cl) ctx._crInfo.claim = cl;
+				ctx._crInfo.self = s;
+			}
+			this.paintCr(ctx);
+			this.syncHdr();
+		})().catch(e => ef(e, 'room_app.paintSelf'));
 	}
 	paintCr(ctx) {
 		if (!ctx || !ctx._crInfo || !ctx.partsEl) return;
@@ -461,7 +479,7 @@ export class RoomApp {
 		Vw.sS(e.modeWrap, { display: ctx && ctx.mode !== 'server' ? '' : 'none' });
 		if (e.modeSel) e.modeSel.value = ctx && ctx.mode !== 'server' ? ctx.mode : 'normal'; // v2.14 §41
 		for (const k of ['trash', 'bulk', 'logout', 'tgs']) Vw.sS(e[k], { display: ctx ? disp(true) : disp(false) });
-		Vw.sS(e.menu, { display: ctx && ctx.room.cr === ctx.uid ? '' : 'none' }); // 作成者のみ §5.3
+		Vw.sS(e.menu, { display: ctx && ctx.room.cr === ctx.uid && (!ctx._crInfo || ctx._crInfo.self) ? '' : 'none' }); // 作成者 §5.3 / v2.30 §57: 鍵自認必須（claim 無き従来部屋は uid フォールバック）のみ §5.3
 	}
 	activeCtx() {
 		return this.rooms.get(this.active) || null;
@@ -804,13 +822,30 @@ export class RoomApp {
 			}); // Vw.click(kb) 終端
 		}
 		const row = Vw.div(f, { class: 'ir-row' });
-		const go = Vw.btn(row, { class: 'ir-btn', type: 'button' }); // v2.15 §42: 全ボタン type=button + form submit で Enter 対応
+		const go = Vw.btn(row, { class: 'ir-btn ir-bigbtn', type: 'button' }); // v2.15 §42 / v2.30 §57: ログイン拡大+明色 type=button + form submit で Enter 対応
 		Vw.sT(go, t('btn.login'));
 		Vw.ael(f, 'submit', e => {
 			e.preventDefault();
 			doLogin(); // v2.22 §49: submit が単一入口（ボタン経由も requestSubmit で submit を発火→ブラウザのパスワードマネージャが保存検知）
 		});
 		Vw.click(go, () => f.requestSubmit());
+		const keyRow = Vw.div(f, { class: 'ir-keyrow' }); // v2.30 §57: ログイン画面右下の秘密鍵移動（ダウンロード）
+		const kmv = Vw.btn(keyRow, { class: 'ir-btn ir-keymv', type: 'button' });
+		Vw.sT(kmv, t('btn.key.move'));
+		Vw.click(kmv, () => {
+			(async () => {
+				const nb0 = room && room.nm ? room.nm : (nmIn.value.trim() ? RoomApp.nb(nmIn.value.trim()) : '');
+				const rid = (room && room.rid) || (nb0 ? await this.ridOfNb(nb0) : '');
+				if (!rid) {
+					Toast(t('msg.key.none'));
+					return;
+				}
+				await this._keyDl({ rid });
+			})().catch(e => {
+				ef(e, 'room_app.keyMv');
+				Toast(t('msg.key.none'));
+			});
+		});
 		const doLogin = () => { // (ボタン→requestSubmit→上記 submit→doLogin の順で必ず 1 回)
 			const nmRaw = nmIn.value.trim();
 			const nb = room && room.nm ? room.nm : (nmRaw ? RoomApp.nb(nmRaw) : '');
@@ -978,7 +1013,7 @@ export class RoomApp {
 		Vw.click(gen, doGen);
 		doGen(); // 起動時点で自動生成パスワードをデフォルト設定
 		const xo = Toggle({ parent: row, label: 'btn.xorig', onChange: () => {} }); // xorig=true で以後メニューから oa 管理（§6.6）
-		const go = Vw.btn(row, { class: 'ir-btn', type: 'button' });
+		const go = Vw.btn(row, { class: 'ir-btn ir-bigbtn', type: 'button' }); // v2.30 §57
 		Vw.sT(go, t('btn.create'));
 		const bw = Vw.btn(row, { class: 'ir-btn', type: 'button' }); // v2.5 §30: 部屋作成画面にも接続設定
 		Vw.sT(bw, '⚙️ ' + t('btn.ws'));
@@ -1463,6 +1498,7 @@ export class RoomApp {
 		ctx.session.on('authOk', () => {
 			this.usageDirty();
 			this.renderTabs();
+			this._paintSelf(ctx); // v2.30 §57: 厳格 self 再評価（バッジと作成者設定ボタン）
 			if (ctx.room.cr === ctx.uid) this.pushC(ctx).catch(() => {}); // 追加仕様: 作成者は設定(mx 等)を再配信（cg 同一分は受信側で無視・新規参加者は採用）
 			if (ctx.sheet) ctx.sheet.broadcastMNow(); // §9.4 自保持索引の周知
 			setTimeout(() => { try { this._tagAsk(ctx); } catch (e) { ef(e, 'room_app.tagAsk'); } }, 1500 + Math.random() * 1500); // v2.19 §46: 同期時に部屋タグ登録表を取得（遅延で参加直後の roster 確定を待つ）
@@ -1489,7 +1525,7 @@ export class RoomApp {
 		ctx.session.on('cr', pl => { // v2.23 §50: 作成者移譲の受信反映（ヘッダバッジ/サブタブの作り直し）
 			if (ctx._crInfo) {
 				ctx._crInfo.cr = pl.cr;
-				ctx._crInfo.self = ctx.room.cr === ctx.uid;
+				this._paintSelf(ctx); // v2.30 §57: 移譲後も鍵所持+再計算一致でのみ self
 			}
 			this.paintCr(ctx);
 			this.renderRoom(rid);
@@ -1560,6 +1596,7 @@ export class RoomApp {
 		Vw.add(pr, 'span', { class: 'ir-parts-lbl' }).textContent = t('lbl.participants');
 		ctx.partsEl = Vw.div(pr, { class: 'ir-row' });
 		this.paintCr(ctx); // v2.20 §47: 作成者表示（クレーム検証済み/自機署名一致）
+		if (ctx._crInfo && ctx.room.cr === ctx.uid && !ctx._crInfo.self) this._paintSelf(ctx); // v2.30 §57: 鍵自認の遅到再評価（badge/設定ボタン）
 		ctx.paintParts = list => {
 			Vw.rc(ctx.partsEl);
 			const ps = (list || ctx.session.state.participants || []).slice().sort((a, b) => (a.t || 0) - (b.t || 0));
@@ -2758,6 +2795,8 @@ export class RoomApp {
 			oa: ctx.room.oa || [],
 			mx: +ctx.room.mx || 0, // 追加仕様: 単一画像上限（bytes）
 		};
+		const cl = (ctx.room && ctx.room.claim) || this._claimFor(ctx); // v2.30 §57: 公式 claim 周知（受領側の self 判定基準）
+		if (cl) o.claim = cl;
 		if (ctx._delSig) { // v2.23 §50: 作成者移譲の証明（旧鍵署名）。移譲直後の初 C 一回だけ同封
 			o.del = ctx._delSig;
 			delete ctx._delSig;

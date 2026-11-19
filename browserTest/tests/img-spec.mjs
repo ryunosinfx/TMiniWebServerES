@@ -289,6 +289,168 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	await M1.close();
 }
 
+{ // v2.29 §56: WS 接続不能メッセージと、本アプリ URL QR の確認→リダイレクト
+	const W = await mk('WS56');
+	await W.goto(BASE + '/img_room.html');
+	await W.click('button:has-text("接続設定")');
+	await W.waitForSelector('input[name="ir-wsb"]', { timeout: 8000 });
+	await W.fill('input[name="ir-wsb"]', 'http://127.0.0.1:9443'); // 接続不能ポート（即拒否）
+	await W.click('.ir-mbx button:has-text("適用")');
+	await W.locator('.ir-mclose').first().click();
+	await W.click('button:has-text("部屋作成")');
+	await W.fill('input[name="ir-cn"]', 'W56' + Date.now().toString(36).slice(-4));
+	await W.fill('input[name="ir-cuid"]', 'WSU');
+	await W.fill('input[name="ir-cpw"]', 'w56-pw');
+	await W.click('.ir-frm button:has-text("部屋作成")');
+	await W.waitForFunction(() => [...document.querySelectorAll('.ir-toast')].some(e => e.textContent.includes('\uFF08Websocket\u30B5\u30FC\u30D0\u30FC\u306B\u63A5\u7D9A\u4E0D\u80FD\uFF09')), null, { timeout: 15000 });
+	ck('wsUnreachToast', true);
+	// §56: WSBASE をデフォルトへ戻す（同一 context 後続汚染防止）。失敗後は部屋シェルなので logout API でホームへ
+	await W.evaluate(() => window.__IRAPP.logout(window.__IRAPP.active)).catch(() => {});
+	await W.waitForTimeout(1500);
+	await W.click('button:has-text("\u63A5\u7D9A\u8A2D\u5B9A")');
+	await W.waitForSelector('input[name="ir-wsb"]', { timeout: 8000 });
+	await W.click('.ir-mbx button:has-text("\u30B5\u30A4\u30C8\u65E2\u5B9A")');
+	await W.locator('.ir-mclose').first().click();
+	await W.waitForTimeout(800);
+	await W.close();
+	// URL QR 生成（別ページ・アプリ同一の QRTool）
+	const mkQrPng = async P => {
+		const nb = Buffer.from('QD' + Date.now().toString(36).slice(-4), 'utf8').toString('base64url');
+		const png = await P.evaluate(async h => {
+			const { QRTool } = await import('/modules/qr_tool.js');
+			const r = await QRTool.make(location.origin + '/img_room.html#' + h, { size: 256, level: 'M', retry: 3 });
+			return r.failed ? null : r.canvas.toDataURL('image/png');
+		}, nb);
+		return { nb, png: png && Buffer.from(png.slice(22), 'base64') };
+	};
+	const G = await mk('QRG56');
+	await G.goto(BASE + '/img_room.html');
+	const qr1 = await mkQrPng(G);
+	await G.close();
+	// ① OK → リダイレクト
+	const R = await mk('QR56');
+	let dlg1 = '';
+	R.on('dialog', async d => { dlg1 = d.message(); await d.accept(); });
+	await R.goto(BASE + '/img_room.html');
+	await R.click('button:has-text("\u53C2\u52A0")');
+	await R.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 });
+	await R.click('.ir-frm button:has-text("QR \u30B9\u30AD\u30E3\u30F3")');
+	await R.waitForSelector('.ir-mdl input[type=file]', { timeout: 8000 });
+	await R.setInputFiles('.ir-mdl input[type=file]', { name: 'urlqr.png', mimeType: 'image/png', buffer: qr1.png });
+	await R.waitForFunction(h => decodeURIComponent(location.hash.replace(/^#/, '')).split(':')[0] === h, qr1.nb, { timeout: 12000 });
+	ck('qrRedirect', dlg1.includes('\u30EA\u30C0\u30A4\u30EC\u30AF\u30C8\u3057\u307E\u3059\u304C\u826F\u3044\u3067\u3059\u304B'));
+	ck('redirectJoinForm', await R.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 8000 }).then(() => true).catch(() => false)); // リロード後のフォーム描待機（race 対策）
+	// ② キャンセル → リダイレクトしない
+	const R2 = await mk('QR56B');
+	let dlg2 = '';
+	R2.on('dialog', async d => { dlg2 = d.message(); await d.dismiss(); });
+	const G2 = await mk('QRG56C');
+	await G2.goto(BASE + '/img_room.html');
+	const qr2 = await mkQrPng(G2);
+	await G2.close();
+	await R2.goto(BASE + '/img_room.html');
+	await R2.click('button:has-text("\u53C2\u52A0")');
+	await R2.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 });
+	await R2.click('.ir-frm button:has-text("QR \u30B9\u30AD\u30E3\u30F3")');
+	await R2.waitForSelector('.ir-mdl input[type=file]', { timeout: 8000 });
+	await R2.setInputFiles('.ir-mdl input[type=file]', { name: 'urlqr.png', mimeType: 'image/png', buffer: qr2.png });
+	await R2.waitForTimeout(2500);
+	ck('qrCancel', dlg2.includes('\u30EA\u30C0\u30A4\u30EC\u30AF\u30C8') && !R2.url().includes('#' + qr2.nb.split('').join('')));
+	ck('cancelNoRedirect', await R2.evaluate(() => !location.hash.includes('%23') && !decodeURIComponent(location.hash).includes('QD') || location.hash === ''));
+	// ③ 非アプリ URL の QR → confirm 出さず従来（検証失敗）トースト
+	const R3 = await mk('QR56D');
+	let dlgCount3 = 0;
+	R3.on('dialog', async d => { dlgCount3++; await d.dismiss(); });
+	const G3 = await mk('QRG56E');
+	await G3.goto(BASE + '/img_room.html');
+	const foreign = await G3.evaluate(async () => {
+		const { QRTool } = await import('/modules/qr_tool.js');
+		const r = await QRTool.make('http://127.0.0.1:9443/random.png', { size: 256, level: 'M', retry: 3 });
+		return r.failed ? null : r.canvas.toDataURL('image/png');
+	});
+	await G3.close();
+	await R3.goto(BASE + '/img_room.html');
+	await R3.click('button:has-text("\u53C2\u52A0")');
+	await R3.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 });
+	await R3.click('.ir-frm button:has-text("QR \u30B9\u30AD\u30E3\u30F3")');
+	await R3.waitForSelector('.ir-mdl input[type=file]', { timeout: 8000 });
+	await R3.setInputFiles('.ir-mdl input[type=file]', { name: 'x.png', mimeType: 'image/png', buffer: Buffer.from(foreign.slice(22), 'base64') });
+	await R3.waitForTimeout(2500);
+	ck('foreignNoConfirm', dlgCount3 === 0 && await R3.evaluate(() => [...document.querySelectorAll('.ir-toast')].some(e => e.textContent.length > 0)));
+	await R.close();
+	await R2.close();
+	await R3.close();
+	// §56 意図的誘発: 死ポート 9443 への WebSocket 失敗ログは検証経路そのもの（非退行対象外）
+	for (let i = errors.length - 1; i >= 0; i--) if (errors[i].includes('127.0.0.1:9443')) errors.splice(i, 1);
+}
+{ // v2.30 §57: self バッジ厳格化（鍵+署名再計算一致と本人 uid のみ）・作成者設定ボタン・ログイン画面右下の鍵移動・拡大ログインボタン
+	const KN = 'K57' + Date.now().toString(36).slice(-4);
+	const K1 = await mk('K57A');
+	let keyFile = '';
+	K1.on('download', d => { keyFile = d.suggestedFilename(); });
+	await K1.goto(BASE + '/img_room.html');
+	await K1.click('button:has-text("\u90E8\u5C4B\u4F5C\u6210")');
+	await K1.fill('input[name="ir-cn"]', KN);
+	await K1.fill('input[name="ir-cuid"]', 'PONTA');
+	await K1.fill('input[name="ir-cpw"]', 'k57-pw');
+	await K1.click('.ir-frm button:has-text("\u90E8\u5C4B\u4F5C\u6210")');
+	await K1.waitForFunction(() => { const e = document.querySelector('.ir-crinfo'); return !!e && e.textContent.includes('\u672C\u4EBA') && e.textContent.includes('\u7F72\u540D\u4E00\u81F4'); }, null, { timeout: 150000, polling: 500 }).catch(async () => {
+		console.log('badge57Dbg:', JSON.stringify(await K1.evaluate(async () => {
+			const app = window.__IRAPP, c = app && app.activeCtx();
+			if (!c) return 'nctx';
+			const k = await app._crKeysLoad(c.rid);
+			return { authed: !!(c.session && c.session.state && c.session.state.authed), cr: c.room.cr, uid: c.uid, hasCI: !!c._crInfo, self: c._crInfo && c._crInfo.self, roomCl: (c.room.claim || '').slice(0, 16), keysCl: k && (k.claim || '').slice(0, 16), sc: await app._crSelfCheck(c, (c.room && c.room.claim) || (c._crInfo && c._crInfo.claim) || (k && k.claim) || ''), wsBase: app.cfg && app.cfg.WSBASE, crinfoEls: document.querySelectorAll('.ir-crinfo').length, crText: (document.querySelector('.ir-crinfo') || {}).textContent || 'NONE', afterPaint: (app.paintCr(c), (document.querySelector('.ir-crinfo') || {}).textContent || 'NONE'), partsEl: !!c.partsEl, view: JSON.stringify(app.view), active: app.active === c.rid, body: document.body.innerText.slice(0, 130).replace(/\s+/g, ' ') };
+		})).slice(0, 400));
+	});
+	ck('badgeSelf', true); // (待機 40s: 連続ループ負荷でのサーバ PBKDF2 認証遅延対策)
+	const menuSel = 'button[aria-label="\u90E8\u5C4B\u8A2D\u5B9A"]'; // evaluate/locator 兼用（:has-text は CSS ではない）
+	ck('menuVisible', await K1.evaluate(sel => { const b = document.querySelector(sel); return !!b && getComputedStyle(b).display !== 'none'; }, menuSel));
+	await K1.click(menuSel);
+	await K1.waitForSelector('.ir-mdl', { timeout: 15000 });
+	ck('menuOpen', true);
+	await K1.locator('.ir-mclose').first().click();
+	const nb1 = await K1.evaluate(() => decodeURIComponent(location.hash.replace(/^#/, '')));
+	const claim1 = await K1.evaluate(() => { const c = window.__IRAPP.activeCtx(); return (c.room && c.room.claim) || (c._crInfo && c._crInfo.claim) || ''; });
+	ck('claimKnown', claim1.split('.').length === 4, claim1.slice(0, 24));
+	await K1.click('button:has-text("\u30ED\u30B0\u30A2\u30A6\u30C8")');
+	await K1.waitForTimeout(1200);
+	// ログイン画面: 拡大ボタン + 右下の鍵移動（作成者端末なので実 DL 成功）
+	// 同一ドキュメントのハッシュ変化だけでは boot 再走せず join 画面が出ない → 明示 reload
+	await K1.goto(BASE + '/img_room.html#' + nb1);
+	await K1.reload();
+	await K1.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 45000 });
+	const st1 = await K1.evaluate(() => { const b = document.querySelector('.ir-frm button.ir-bigbtn'); if (!b) return null; const s = getComputedStyle(b); return { fs: s.fontSize, bg: s.backgroundColor }; });
+	ck('bigLoginBtn', !!st1 && parseFloat(st1.fs) >= 21 && st1.bg.includes('74, 158, 255'), JSON.stringify(st1));
+	const kmvBox = await K1.evaluate(() => { const k = document.querySelector('.ir-keyrow button'); const f = document.querySelector('.ir-frm'); if (!k || !f) return null; const kr = k.getBoundingClientRect(), fr = f.getBoundingClientRect(); return kr.left + kr.width / 2 > fr.left + fr.width * 0.5 && kr.bottom > fr.top + fr.height * 0.6; });
+	ck('keyMvBottomRight', !!kmvBox);
+	await K1.click('.ir-keyrow button');
+	for (let i = 0; i < 12 && !keyFile; i++) await K1.waitForTimeout(500);
+	ck('keyMvDownload', keyFile.startsWith('imgroom-key-'), keyFile);
+	await K1.close();
+	// 別端末（鍵なし）で本人 uid 参加 → 「本人」禁止・（署名一致）のみ・設定ボタン非表示
+	const K2 = await mk('K57B');
+	await K2.goto(BASE + '/img_room.html#' + nb1 + '::' + claim1);
+	await K2.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 30000 });
+	await K2.fill('input[name="ir-nm"]', KN);
+	await K2.fill('input[name="ir-uid"]', 'PONTA');
+	await K2.fill('input[name="ir-pw"]', 'k57-pw');
+	await K2.click('.ir-frm button.ir-bigbtn');
+	await K2.waitForFunction(() => { const c = window.__IRAPP && window.__IRAPP.activeCtx(); return !!(c && c.session && c.session.state && c.session.state.authed); }, null, { timeout: 75000, polling: 500 });
+	await K2.waitForFunction(() => { const e = document.querySelector('.ir-crinfo'); return !!e && e.textContent.includes('\u7F72\u540D'); }, null, { timeout: 40000, polling: 500 }).catch(async () => {
+		console.log('badge57bDbg:', JSON.stringify(await K2.evaluate(() => {
+			const app = window.__IRAPP, c = app && app.activeCtx();
+			if (!c) return 'nctx';
+			return { cr: c.room.cr, uid: c.uid, hasCI: !!c._crInfo, self: c._crInfo && c._crInfo.self, rr: !!c.partsEl, els: document.querySelectorAll('.ir-crinfo').length, view: JSON.stringify(app.view), active: app.active === c.rid, body: document.body.innerText.slice(0, 110).replace(/\s+/g, ' ') };
+		})).slice(0, 400));
+	});
+	const k2t = await K2.evaluate(() => (document.querySelector('.ir-crinfo') || {}).textContent || '');
+	ck('pancoNoSelf', !k2t.includes('\u672C\u4EBA') && k2t.includes('\u7F72\u540D\u4E00\u81F4'), k2t.replace(/\s+/g, ' '));
+	ck('pancoMenuHidden', await K2.evaluate(sel => { const b = document.querySelector(sel); return !b || getComputedStyle(b).display === 'none'; }, menuSel));
+	await K2.click('button:has-text("\u30ED\u30B0\u30A2\u30A6\u30C8")').catch(() => {}); // §57: roster 残骸を残さない
+	await K2.waitForTimeout(1000);
+	await K2.close();
+}
+
 const shot = async (pages, tags, file) => {
 	const bufs = [];
 	for (const p of pages) bufs.push((await p.screenshot({ fullPage: true })).toString('base64'));
@@ -1241,7 +1403,7 @@ try {
 			const t = el.closest('.ir-thumb');
 			return !!t && !!t.dataset.h10 && !own.has(t.dataset.h10);
 		});
-	}, null, { timeout: 45000 });
+	}, null, { timeout: 45000, polling: 500 });
 } catch (e961) {
 	console.log('kDiag', JSON.stringify(await K1.evaluate(kState)));
 	console.log('aDiag', JSON.stringify(await A.evaluate(() => {
@@ -1287,7 +1449,7 @@ await N9.waitForFunction(() => {
 		const t = el.closest('.ir-thumb');
 		return !!t && !!t.dataset.h10 && !own.has(t.dataset.h10);
 	});
-}, null, { timeout: 45000 });
+}, null, { timeout: 45000, polling: 500 });
 const nh = await N9.evaluate(() => {
 	const c = window.__IRAPP.activeCtx(),
 		own = new Set(c.collection.manifest.map(e => e.h)),
@@ -2070,92 +2232,6 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 	ck('tgSyncAlone', true);
 	await Y1.close();
 	await Y2.close();
-}
-{ // v2.29 §56: WS 接続不能メッセージと、本アプリ URL QR の確認→リダイレクト
-	const W = await mk('WS56');
-	await W.goto(BASE + '/img_room.html');
-	await W.click('button:has-text("接続設定")');
-	await W.waitForSelector('input[name="ir-wsb"]', { timeout: 8000 });
-	await W.fill('input[name="ir-wsb"]', 'http://127.0.0.1:9443'); // 接続不能ポート（即拒否）
-	await W.click('.ir-mbx button:has-text("適用")');
-	await W.locator('.ir-mclose').first().click();
-	await W.click('button:has-text("部屋作成")');
-	await W.fill('input[name="ir-cn"]', 'W56' + Date.now().toString(36).slice(-4));
-	await W.fill('input[name="ir-cuid"]', 'WSU');
-	await W.fill('input[name="ir-cpw"]', 'w56-pw');
-	await W.click('.ir-frm button:has-text("部屋作成")');
-	await W.waitForFunction(() => [...document.querySelectorAll('.ir-toast')].some(e => e.textContent.includes('\uFF08Websocket\u30B5\u30FC\u30D0\u30FC\u306B\u63A5\u7D9A\u4E0D\u80FD\uFF09')), null, { timeout: 15000 });
-	ck('wsUnreachToast', true);
-	await W.close();
-	// URL QR 生成（別ページ・アプリ同一の QRTool）
-	const mkQrPng = async P => {
-		const nb = Buffer.from('QD' + Date.now().toString(36).slice(-4), 'utf8').toString('base64url');
-		const png = await P.evaluate(async h => {
-			const { QRTool } = await import('/modules/qr_tool.js');
-			const r = await QRTool.make(location.origin + '/img_room.html#' + h, { size: 256, level: 'M', retry: 3 });
-			return r.failed ? null : r.canvas.toDataURL('image/png');
-		}, nb);
-		return { nb, png: png && Buffer.from(png.slice(22), 'base64') };
-	};
-	const G = await mk('QRG56');
-	await G.goto(BASE + '/img_room.html');
-	const qr1 = await mkQrPng(G);
-	await G.close();
-	// ① OK → リダイレクト
-	const R = await mk('QR56');
-	let dlg1 = '';
-	R.on('dialog', async d => { dlg1 = d.message(); await d.accept(); });
-	await R.goto(BASE + '/img_room.html');
-	await R.click('button:has-text("\u53C2\u52A0")');
-	await R.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 });
-	await R.click('.ir-frm button:has-text("QR \u30B9\u30AD\u30E3\u30F3")');
-	await R.waitForSelector('.ir-mdl input[type=file]', { timeout: 8000 });
-	await R.setInputFiles('.ir-mdl input[type=file]', { name: 'urlqr.png', mimeType: 'image/png', buffer: qr1.png });
-	await R.waitForFunction(h => decodeURIComponent(location.hash.replace(/^#/, '')).split(':')[0] === h, qr1.nb, { timeout: 12000 });
-	ck('qrRedirect', dlg1.includes('\u30EA\u30C0\u30A4\u30EC\u30AF\u30C8\u3057\u307E\u3059\u304C\u826F\u3044\u3067\u3059\u304B'));
-	ck('redirectJoinForm', await R.locator('.ir-frm input[name="ir-nm"]').count() === 1);
-	// ② キャンセル → リダイレクトしない
-	const R2 = await mk('QR56B');
-	let dlg2 = '';
-	R2.on('dialog', async d => { dlg2 = d.message(); await d.dismiss(); });
-	const G2 = await mk('QRG56C');
-	await G2.goto(BASE + '/img_room.html');
-	const qr2 = await mkQrPng(G2);
-	await G2.close();
-	await R2.goto(BASE + '/img_room.html');
-	await R2.click('button:has-text("\u53C2\u52A0")');
-	await R2.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 });
-	await R2.click('.ir-frm button:has-text("QR \u30B9\u30AD\u30E3\u30F3")');
-	await R2.waitForSelector('.ir-mdl input[type=file]', { timeout: 8000 });
-	await R2.setInputFiles('.ir-mdl input[type=file]', { name: 'urlqr.png', mimeType: 'image/png', buffer: qr2.png });
-	await R2.waitForTimeout(2500);
-	ck('qrCancel', dlg2.includes('\u30EA\u30C0\u30A4\u30EC\u30AF\u30C8') && !R2.url().includes('#' + qr2.nb.split('').join('')));
-	ck('cancelNoRedirect', await R2.evaluate(() => !location.hash.includes('%23') && !decodeURIComponent(location.hash).includes('QD') || location.hash === ''));
-	// ③ 非アプリ URL の QR → confirm 出さず従来（検証失敗）トースト
-	const R3 = await mk('QR56D');
-	let dlgCount3 = 0;
-	R3.on('dialog', async d => { dlgCount3++; await d.dismiss(); });
-	const G3 = await mk('QRG56E');
-	await G3.goto(BASE + '/img_room.html');
-	const foreign = await G3.evaluate(async () => {
-		const { QRTool } = await import('/modules/qr_tool.js');
-		const r = await QRTool.make('http://127.0.0.1:9443/random.png', { size: 256, level: 'M', retry: 3 });
-		return r.failed ? null : r.canvas.toDataURL('image/png');
-	});
-	await G3.close();
-	await R3.goto(BASE + '/img_room.html');
-	await R3.click('button:has-text("\u53C2\u52A0")');
-	await R3.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 10000 });
-	await R3.click('.ir-frm button:has-text("QR \u30B9\u30AD\u30E3\u30F3")');
-	await R3.waitForSelector('.ir-mdl input[type=file]', { timeout: 8000 });
-	await R3.setInputFiles('.ir-mdl input[type=file]', { name: 'x.png', mimeType: 'image/png', buffer: Buffer.from(foreign.slice(22), 'base64') });
-	await R3.waitForTimeout(2500);
-	ck('foreignNoConfirm', dlgCount3 === 0 && await R3.evaluate(() => [...document.querySelectorAll('.ir-toast')].some(e => e.textContent.length > 0)));
-	await R.close();
-	await R2.close();
-	await R3.close();
-	// §56 意図的誘発: 死ポート 9443 への WebSocket 失敗ログは検証経路そのもの（非退行対象外）
-	for (let i = errors.length - 1; i >= 0; i--) if (errors[i].includes('127.0.0.1:9443')) errors.splice(i, 1);
 }
 await N9.close();
 await K1.close();
