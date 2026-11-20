@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.30
+- ステータス: ドラフト v2.32
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1653,3 +1653,25 @@ D) QR PNG 復号: アプリ QRTool で生成した `TMIWR1:` QR を canvas→jsQ
 - **投稿者列**: `it.mine`（roomItems の所持者判定がそのままトップレベルへ通過）のとき `.ir-lc-uid` 内にグレー小字の `（自分）`（ロケール `lbl.me`、en は ` (me)`）。テスト `l51Cells` は `startsWith('LSU') && includes('\uFF08\u81EA\u5206\uFF09')`（全角括弧はコードポイント指定）。
 - テストの再参加フローは 3 種の状況を受容する: (a) home 表示で「参加」→ 手動ログイン、(b) 端末 remember による **autoJoin で既に部屋（authed）**→ プチェックでスキップ、(c) 「参加」未描画→ 作成者カードの「ログイン」経由（ダンプ付き）。加えて連続 `setInputFiles` は共有 1 本 Flight のため完了待ち、`waitForFunction` は CSP により関数形式必須、DOM 検証は仮想窓の実体化待ち。
 - 教訓: ① 新規 CalView モードのセクションは**幅/高さの flex を明示**しないと既存 flex コンテナの既定で配置が壊れる（day/week/month は既存 CSS に隠れていた）。② **一律高さ前提の仮想窓で「変高」は禁物**。揃えて fit が安全。③ テストの全角括弧リテラルは输入法差で不一致しうる→`\uXXXX` で書く。
+
+## §58（v2.31 追加）: 新規利用者向け Landing ページと Setup.md
+
+- **landing.html（リポジトリ直下・単一 HTML）**: spec.md を元にした新規利用者向け紹介ページ。
+  「アプリ本体は GitHub Pages、自宅 LAN に WebSocket 中継サーバーを用意するだけ」を訴求。
+  3 ステップ（アプリを開く→LAN サーバー起動→接続設定 QR/リンクで伝える）、機能カード、
+  ASCII 構成図、Node 最短コマンド、仕様/テスト一覧。外部依存ゼロ（インライン CSS/SVG favicon）。
+- **Setup.md（直下）**: 同じ前提の導入手順 2 系統。
+  **Node.js 版**（Node18+/`npm run server`/wss 終端 1 行（Caddy）/systemd 常駐/接続設定 QR・リンク）、
+  **Raspberry Pi Pico W 版**（Kaluma フラッシュ→`npm run build_flash`/Wi-Fi storage 設定/`wwwload`
+  静的転送/http://\<pico-ip\>:8080 でアプリ自体を配信）。
+- 技術的に正直に書き分けた要点: **https（Pages）ページから `ws://` は mixed-content で遮断**されるため、
+  Pages 併用は wss 終端が必須。Pico W 版は http LAN 構成（接続設定不要の same-origin）が正しい姿。
+- 検証: browserTest/verify-landing.mjs（file:// 読込・全 href 実在・console error ゼロ・
+  desktop/mobile 横 overflow なし）。README 冒頭に landing/Setup への導線追加。
+
+## §59（v2.32 追加）: landing.html に保存エリアと消し方の節
+
+- landing.html（§58）の「仕様とテスト」表の下に **「保存エリアと消し方（OPFS / IndexedDB / localStorage …）」** 節を追加。アプリ挙動は不変（紹介文書の拡張のみ）。
+- 実態に基づく対応表: **OPFS**（`bodies/<hash>`・`meta/…jsonl`・`trash/`・`room.json`・`keys/<rid>.json`・`claim/<rid>.json`・`tagreg/`）／**IndexedDB**（二次索引 `imgroom_tagidx` のみ・再生成可能）／**localStorage**（接続設定・言語・参加日時・sweep 日付・退避暗号文）／**sessionStorage**（退避復鍵・タブ固有）／メモリ（サムネイル一時バイト）。**Cookie・Service Worker 不使用**を明記。
+- 消去手順 3 系統: (1) ブラウザのサイトデータ削除 (2) DevTools Application → Storage →「ストレージを消去」（OPFS は File System Access/Origin Private File System ノードで個別確認可）(3) アプリ内（ゴミ箱☓完全削除・⚙️ 部屋削除・trash 30 日自動掃除 §9.8）。**同一写真を他端末が持つ場合の復活**（コンテンツアドレス）と、**オリジン単位**（github.io vs LAN IP）と**鍵の退避→移行**を注記。
+- landing の版数表示をフッタ含む v2.32 に同期（此前 v2.30 据わりの表示漏れ修正）。Setup.md へ相互リンク。 保存エリアは実パス準拠で `rooms/<rid>/room.json`（部屋単位）／`keys|claim|tagreg/<rid>.json`（ルートの相対）。検証で mobileOverflow が出たため `overflow-wrap:anywhere` + 640px 以下で表をカード積み重ねへ（mobileOverflow: false 再確認）。検証: verify-landing.mjs に保存節キーワード検査（OPFS/IndexedDB/localStorage/ストレージを消去/秘密鍵）追加・外部 http リンクは実在チェック除外。

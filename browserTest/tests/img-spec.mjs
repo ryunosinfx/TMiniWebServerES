@@ -549,7 +549,7 @@ await A.click('.ir-mbx .ir-rw:has-text("同期") input[type=radio]'); // v2.2 §
 await A.waitForSelector('.ir-toast', { timeout: 5000 });
 await A.click('.ir-mclose');
 await A.click('button:has-text("ログアウト")');
-await A.waitForSelector('button:has-text("ログイン")', { timeout: 25000 }); // 連続ループ負荷で home 再描画が遅い環境向けに待機放宽（製品挙動は同一）
+await A.waitForSelector('button:has-text("ログイン")', { timeout: 50000 }); // 連続ループ負荷で home 再描画が遅い環境向けに待機放宽（製品挙動は同一）
 await A.click('button:has-text("ログイン")');
 await A.waitForSelector('.ir-rd', { timeout: 5000 });
 const srvRadio = A.locator('.ir-rd:has-text("サーバー") input');

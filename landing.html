@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ImageRoom — 自宅LANだけの写真共有ルーム</title>
+<meta name="description" content="ImageRoom はアプリ本体を GitHub Pages に置き、自宅 LAN の WebSocket 中継サーバーだけで動くセルフホスト写真共有アプリです。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖼️</text></svg>">
+<style>
+:root { --bg:#0e1320; --fg:#eef2f9; --mut:#9fb0c8; --card:#171f31; --line:#26324b; --acc:#4a9eff; --acc2:#6fb4ff; --ok:#39c46f; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif; line-height:1.65; }
+.wrap { max-width:980px; margin:0 auto; padding:0 20px 64px; }
+header.hero { padding:72px 20px 48px; text-align:center; background:radial-gradient(1000px 420px at 50% -80px, #1d2c4d 0%, var(--bg) 70%); }
+.hero .logo { font-size:2.6em; font-weight:800; letter-spacing:.02em; }
+.hero .logo em { font-style:normal; color:var(--acc); }
+.hero p.sub { color:var(--mut); max-width:720px; margin:14px auto 0; font-size:1.05em; }
+.badge { display:inline-block; margin-top:18px; padding:4px 14px; border:1px solid var(--line); border-radius:999px; color:var(--ok); font-size:.9em; }
+.steps { display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); margin:34px 0 8px; }
+.step { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
+.step b.num { display:inline-block; width:26px; height:26px; line-height:26px; text-align:center; border-radius:50%; background:var(--acc); color:#fff; margin-right:8px; }
+.step h3 { margin:6px 0 6px; font-size:1.06em; }
+.step p { margin:0; color:var(--mut); font-size:.94em; }
+.cta { text-align:center; margin:30px 0 10px; }
+.cta a { display:inline-block; margin:6px 8px; padding:13px 28px; border-radius:10px; text-decoration:none; font-weight:700; font-size:1.05em; }
+.cta a.main { background:var(--acc); color:#fff; }
+.cta a.main:hover { background:var(--acc2); }
+.cta a.sub { border:1px solid var(--line); color:var(--fg); }
+h2 { margin:52px 0 12px; font-size:1.45em; border-bottom:1px solid var(--line); padding-bottom:8px; }
+.grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+.card h4 { margin:0 0 6px; font-size:1.02em; }
+.card p { margin:0; color:var(--mut); font-size:.92em; }
+figure.diagram { margin:20px 0 0; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; overflow-x:auto; }
+figure.diagram pre { margin:0; color:var(--fg); font-size:.86em; line-height:1.5; }
+figure.diagram figcaption { color:var(--mut); font-size:.86em; margin-top:8px; }
+pre.cmd { background:#0a0f1a; border:1px solid var(--line); border-radius:10px; padding:12px 14px; overflow-x:auto; font-size:.88em; }
+table { border-collapse:collapse; width:100%; margin-top:12px; font-size:.92em; }
+th,td { border:1px solid var(--line); padding:8px 10px; text-align:left; }
+th { background:var(--card); }
+.note { color:var(--mut); font-size:.9em; margin-top:10px; }
+details.st { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin:14px 0 0; }
+details.st > summary { cursor:pointer; font-weight:700; }
+details.st p { color:var(--mut); font-size:.93em; }
+table.st td code { background:#0a0f1a; border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:.9em; }
+table.st td code { overflow-wrap:anywhere; word-break:break-word; }
+table.st { table-layout:auto; }
+table.st td { min-width:0; }
+@media (max-width:640px) { table.st, table.st thead, table.st tbody, table.st tr, table.st td, table.st th { display:block; width:auto; max-width:100%; } table.st tr { margin-bottom:10px; border:1px solid var(--line); border-radius:8px; padding:6px; } table.st td { border:0; border-bottom:1px dashed var(--line); } table.st td:last-child { border-bottom:0; } table.st th.w30 { width:auto; } }
+th.w30 { width:30%; }
+footer { margin-top:56px; text-align:center; color:var(--mut); font-size:.88em; border-top:1px solid var(--line); padding-top:18px; }
+footer a { color:var(--acc); }
+</style>
+</head>
+<body>
+<header class="hero">
+	<div class="logo">🖼️ <em>Image</em>Room</div>
+	<div class="sub">アプリ本体は <b>GitHub Pages</b> に公開済み。あなたが用意するのは、<b>自宅 LAN の WebSocket 中継サーバーだけ</b>。<br>
+	クラウドにも外部サーバーにも写真を置かない、自分たちだけの写真共有ルーム。</div>
+	<span class="badge">サーバー1つ・設定QR1枚・はじめまで約5分</span>
+</header>
+<div class="wrap">
+	<h2>はじめ方は 3 ステップ</h2>
+	<div class="steps">
+		<div class="step"><b class="num">1</b><h3>アプリを開く</h3><p>GitHub Pages 上の <code>img_room.html</code> をブラウザで開くだけ。インストールもアカウントも不要です。</p></div>
+		<div class="step"><b class="num">2</b><h3>自宅 LAN にサーバーを起動</h3><p><b>Raspberry Pi Pico W</b> でも <b>Node.js</b> でもOK。WebSocket 中継（デフォルトポート 8080）を立ち上げるだけ。写真はどこにも上がりません。</p></div>
+		<div class="step"><b class="num">3</b><h3>接続を教える</h3><p>アプリの「接続設定」でサーバーアドレスを指定（QR・リンクでも伝搬）。同じ LAN の人は誰でも部屋を作って参加できます。</p></div>
+	</div>
+	<div class="cta">
+		<a class="main" href="./wwwroot/img_room.html">アプリを開く</a>
+		<a class="sub" href="./Setup.md">セットアップ手順（Pico W / Node.js）</a>
+		<a class="sub" href="./docs/img_room_spec.md">仕様書</a>
+	</div>
+
+	<h2>何ができる？</h2>
+	<div class="grid">
+		<div class="card"><h4>🔒 クラウドゼロ</h4><p>写真の保存先は参加者端末の内蔵ストレージ（OPFS/IndexedDB）だけ。LAN の中継サーバーはステートレスで、橋渡しした通信はすべて家庭内ネットワークの中で完結します（外部クラウドには一切上がりません）。</p></div>
+		<div class="card"><h4>🖼️ サムネイルグリッド + カレンダー</h4><p>部屋に入ると日付別の写真棚。日/週/月の切り替え、タグ絞り込み、10 万枚規模向けの縮小索引（ハッシュ重複は 1 ファイル）。</p></div>
+		<div class="card"><h4>📴 オフラインでも見られる</h4><p>既視の写真はキャッシュ済み。通信が切れても閲覧でき、再接続で自動同期。「（Websocketサーバーに接続不能）」の表示で原因も明確。</p></div>
+		<div class="card"><h4>🔑 部屋パスワード + チャレンジ認証</h4><p>平文パスワードはLANの中継を見ない限り流通しません。QR スキャンで即ログイン、作成者端末は電子署名で自己証明できます。</p></div>
+		<div class="card"><h4>📦 一括 ZIP ダウンロード</h4><p>部屋全体を分割 ZIP でダウンロード。ブラウザ拡張 <b>imgroomCompanion</b> を使えば毎日定時に自動取得・ハッシュ重複排除・7 世代バックアップまで無停止で回せます。</p></div>
+		<div class="card"><h4>📱 スマホでも</h4><p>レスポンシUI・一時退避（12h 経過で自動スキャン・退避）つき。LAN 内 http でもカメラ以外の主要機能は動作します。</p></div>
+	</div>
+
+	<h2>システム構成</h2>
+	<figure class="diagram">
+		<pre>
+┌─────────────────┐        https（静的ファイルのみ）        ┌──────────────────┐
+│ ブラウザ         │ ◄───────────────────────────────────── │ GitHub Pages      │
+│ ImageRoom アプリ │                                        │ （このリポジトリ） │
+└───────┬─────────┘                                        └──────────────────┘
+        │ ws(s)://あなたのLANサーバー:8080/ws/chat/&lt;部屋ID&gt;
+┌───────▼─────────┐
+│ 自宅 LAN サーバー │  ← ステートレス中継（通信は全て LAN の中で完結）
+│                  │     写真の実体は参加者端末にだけ常時保存
+│ Raspberry Pi     │     Node.js（PC/NAS）でも Pico W でも動く軽量実装
+│ Pico W / Node.js │
+└─────────────────┘</pre>
+		<figcaption>アプリは GitHub Pages が配信。LAN サーバーの役割は WebSocket 中継（＋お好みで静的配信）のみです。</figcaption>
+	</figure>
+
+	<h2>最短コマンド（Node.js の例）</h2>
+	<pre class="cmd">git clone https://github.com/&lt;あなたのユーザー名&gt;/TMiniWebServerES.git
+cd TMiniWebServerES
+npm run server        # 0.0.0.0:8080 で静的配信 + WebSocket 中継が起動</pre>
+	<p class="note">GitHub Pages のアプリ（https）から接続するには、LAN 側に <code>wss://</code>（TLS）の終端を 1 行追加します。詳細と Raspberry Pi Pico W 版の手順は <a href="./Setup.md">Setup.md</a> にまとめています。</p>
+
+	<h2>仕様とテスト</h2>
+	<table>
+		<tr><th>仕様書</th><td><code>docs/img_room_spec.md</code>（v2.30・追加仕様履歴込み）</td></tr>
+		<tr><th>実装契約</th><td><code>docs/impl_contracts.md</code>（モジュール別の振る舞い）</td></tr>
+		<tr><th>回帰テスト</th><td>Playwright 11 _suite（部屋/仕様/デモ/退避/性能/縮小/10万枚/モバイル/比率/セキュリティ/バックアップ拡張）が常時 green</td></tr>
+		<tr><th>ライセンス</th><td>MIT</td></tr>
+	</table>
+
+	<h2>保存エリアと消し方（OPFS / IndexedDB / localStorage …）</h2>
+	<p>ImageRoom はブラウザに内蔵の保存エリアだけを使い、<b>Cookie と Service Worker は使いません</b>。保存されるデータと、確実な消し方をまとめます。</p>
+	<table class="st">
+		<tr><th class="w30">保存エリア</th><th>何を保存</th><th class="w30">個別の消し方</th></tr>
+		<tr><td><b>OPFS</b>（Origin Private File System）</td><td>写真本体 <code>bodies/&lt;hash&gt;</code>・メタ <code>meta/…jsonl</code>・ゴミ箱 <code>trash/</code>・部屋定義 <code>rooms/&lt;rid&gt;/room.json</code>・作成者秘密鍵 <code>keys/&lt;rid&gt;.json</code>・作成者クレーム <code>claim/&lt;rid&gt;.json</code>・タグ <code>tagreg/</code></td><td>アプリ内: ゴミ箱で☓（完全削除）または「ゴミ箱を空にする」／トップページの部屋カード「削除」（keys・claim・索引も整理）。完全初期化は下の DevTools / サイトデータ削除</td></tr>
+		<tr><td><b>IndexedDB</b></td><td>タグ検索補助の二次索引 <code>imgroom_tagidx</code>（失っても OPFS から再生成可能。写真自体は無し）</td><td>ブラウザのサイトデータ削除で一緒に消える。DevTools → IndexedDB → 右クリック Delete で単独削除可</td></tr>
+		<tr><td><b>localStorage</b></td><td>接続設定（WebSocket アドレス）・言語・参加日時・ゴミ箱掃除の日付・一時退避の暗号文（12h 超の自動スキャン時にだけ一時的に発生）</td><td>サイトデータ削除で消える（設定は最初に戻る）</td></tr>
+		<tr><td><b>sessionStorage</b></td><td>一時退避の復鍵（タブ専用。タブを閉じれば消滅）</td><td><b>タブを閉じるだけで消える</b></td></tr>
+		<tr><td>メモリのみ</td><td>サムネイル・画像復号の一時バイト</td><td>ページを閉じれば自動消滅</td></tr>
+	</table>
+	<details class="st" open><summary>確実な全消去（この端末から ImageRoom のデータを消す）</summary>
+	<ol>
+		<li><b>ブラウザ設定から</b>: サイトデータ削除（Chrome: 鍵/情報アイコン（URL 欄の左）→ サイトの設定 → このサイトデータの表示と削除 → 「削除」）。OPFS・IndexedDB・localStorage がまとめて消えます。</li>
+		<li><b>DevTools から（正確）</b>: F12 → <b>Application</b> → 左ツリーの <b>Storage</b>（このドメイン）→ <b>「ストレージを消去」</b>（Clear site data）。各エリアの内訳は Storage Manager / IndexedDB / <b>「Origin Private File System」ノード</b> で確認・個別削除できます。</li>
+		<li><b>特定の写真だけ</b>: 部屋のサムネイル右上 ☓ でゴミ箱へ → ゴミ箱ビューで ☓（完全削除）。<code>trash/</code> は既定 <b>30 日</b>で自動掃除（spec §9.8）。ゴミ箱から完全削除しても、<b>同じ写真を他端末が持っていれば同期で復活します</b>（コンテンツアドレス方式）。</li>
+	</ol>
+	<p>※ GitHub Pages 版は <code>&lt;user&gt;.github.io</code>、LAN 直結版はサーバーの IP/ポートのオリジンが保存単位（異なるオリジンのデータは干渉しません）。秘密鍵ファイルはログイン画面右下「秘密鍵の移動（ダウンロード）」で退避してから消すと、後で別の端末へ引き継げます。</p>
+	</details>
+
+	<footer>ImageRoom v2.32 · アプリは GitHub Pages、データは自宅 LAN。 · <a href="./Setup.md">Setup</a> · <a href="./docs/img_room_spec.md">Spec</a></footer>
+</div>
+</body>
+</html>
