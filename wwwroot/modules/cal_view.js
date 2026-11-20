@@ -180,7 +180,7 @@ export class CalView {
 			wp = Math.max(this.wp, h);
 		this.vl = new VirtList({
 			container: this.box,
-			page: pg,
+			page: this.md === 'list' ? i => this.secPx(i) : pg, // v2.33 §60: 日別リストは実件数高さ（0.5 行隙間）
 			winPages: wp,
 			count: () => this.pgCnt(),
 			render: i => this.pgEl(i),
@@ -279,9 +279,22 @@ export class CalView {
 		this.sec = [...units]
 			.sort((a, b) => b - a)
 			.map(u => ({ u, d: this.uDate(u), v: img.get(u) || [], today: this.uOf(tk) === u }));
+		if (this.md === 'list') this.sec = this.sec.filter(x => x.v.length); // v2.33 §60: 日別リストはデータ有单元のみ（アンカー空行=旧来 pg 高の空白が出ていた）
 	}
 	pgCnt() {
 		return this.sec.length;
+	}
+	secShown(i) {
+		// セクション i の現在表示件数（cap と +N 展開を考慮）
+		const s0 = this.sec[i];
+		if (!s0) return 0;
+		if (!this.cap) return s0.v.length;
+		return Math.min(s0.v.length, this._exp.get(s0.u) || this.cap);
+	}
+	secPx(i) {
+		// v2.33 §60: list（日別）セクションの可変高さ = ヘッダ + 実件数分 + 節間隔 0.5 行。
+		// 従来は全セクション共通（最大件数）高さで、少ない日の下にサムネイル 1 個分の空白が残っていた
+		return HH + 10 + 4 + Math.max(1, this.secShown(i)) * this.lrh + Math.round(this.lrh * 0.5);
 	}
 	pgPx() {
 		// 全セクション共通の高さ: ヘッダ + cap 相当の行（flex 折返し）。超過分はセクション内スクロール
@@ -361,8 +374,11 @@ export class CalView {
 			});
 			Vw.click(btn, () => {
 				this._exp.set(k, shown + Math.max(this.cap, 4) * 4);
-				Vw.rc(host);
-				this.fill(host, s, k);
+				if (this.vl) this.vl.refresh(true); // v2.33 §60: 可変高さで枠の高さも再計算（窓内再作成）
+				else {
+					Vw.rc(host);
+					this.fill(host, s, k);
+				}
 				if (this.oE) this.oE(k);
 			});
 		}

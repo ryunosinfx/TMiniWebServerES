@@ -294,17 +294,15 @@ export class RoomApp {
 		})().catch(e => ef(e, 'room_app.paintSelf'));
 	}
 	paintCr(ctx) {
-		if (!ctx || !ctx._crInfo || !ctx.partsEl) return;
-		let el = ctx.partsEl.parentElement && ctx.partsEl.parentElement.querySelector('.ir-crinfo');
-		if (!el) {
-			const bar = ctx.partsEl.parentElement;
-			if (!bar) return;
-			el = Vw.add(bar, 'span', { class: 'ir-crinfo' });
-		}
-		const i = ctx._crInfo;
-		el.textContent = I18N.t('lbl.cr') + ' ' + (i.cr || '?') + ' ' + (i.self ? I18N.t('lbl.cr.self') : i.ok ? I18N.t('lbl.cr.ok') : I18N.t('lbl.cr.bad'));
-		el.classList.toggle('bad', !i.ok && !i.self);
-		el.classList.toggle('ok', i.ok || i.self);
+		// v2.33 §60: 「作成者 xxx（署名一致）」バッジは廃止。ヘッダーの部屋名下に小さなグレーで
+		// 「作成者 xxx」のみ表示（自認/検証結果の表示はない。self 判定は部屋設定ボタンの表示条件として内部維持）
+		const sub = this.hdEls && this.hdEls.crSub;
+		if (!sub) return;
+		const cr = ctx && ctx.room && ctx.room.cr;
+		if (cr && this.view && this.view.t === 'room') {
+			sub.style.display = '';
+			Vw.sT(sub, I18N.t('lbl.cr') + ' ' + cr);
+		} else sub.style.display = 'none';
 	}
 	qOverride() { // §11: GRID_COLS/GRID_ROWS/CAL_VIEW のみ（デバッグ用・永続化しない）
 		let p;
@@ -367,7 +365,10 @@ export class RoomApp {
 		this.tabsEl = Vw.div(b, { class: 'ir-tabs' });
 		this.main = Vw.div(b, { class: 'ir-main' });
 		const e = (this.hdEls = {});
-		e.title = Vw.add(this.hd, 'b');
+		e.hdc = Vw.add(this.hd, 'span', { class: 'ir-hdc' }); // v2.33 §60: 部屋名下に作成者サブ行
+		e.title = Vw.add(e.hdc, 'b');
+		e.crSub = Vw.add(e.hdc, 'span', { class: 'ir-crsub' });
+		e.crSub.style.display = 'none';
 		e.usage = Vw.add(this.hd, 'span', { class: 'ir-mut' }); // §9.11 使用量
 		e.modeWrap = Vw.div(this.hd, { class: 'ir-row' }); // §5.2 モード切替（server では非表示）
 		// v2.2 §26 → v2.14 §41: ログイン画面でもモード選択可（通常都度/取得保持/同期の select。server セッションでは非表示のまま）
@@ -1604,6 +1605,7 @@ export class RoomApp {
 				const b = Vw.add(ctx.partsEl, 'span', { class: 'ir-pbadge' + (pt.uid === ctx.uid ? ' me' : '') });
 				Vw.add(b, 'span').textContent = pt.uid;
 				if (pt.md === 'server') Badge(b, 'ir-ps', 'S');
+				if (ctx.room.cr && pt.uid === ctx.room.cr) Badge(b, 'ir-pc', '\u{1F451}'); // v2.33 §60: 作成者バッジ（参加者列の中で明示）
 				b.title = t('lbl.part.join') + ': ' + (pt.t ? new Date(pt.t).toLocaleString() + ' (' + pt.t + ')' : '?');
 			}
 		};

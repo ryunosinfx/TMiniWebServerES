@@ -86,6 +86,15 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	}));
 	ck('l51Head', /\d{4}\/\d{2}\/\d{2}/.test(i51.hd) && i51.note === 'サムネイル 画像名 投稿者 投稿日 タグ ハッシュ値', JSON.stringify(i51).slice(0, 120));
 	ck('l51Desc', i51.rows.length >= 2 && i51.rows[0].ts >= i51.rows[1].ts);
+	// v2.33 §60: 日別リストは実件数高さ+0.5 行の節間隔（枠高−内容高≈48px±。旧実装は全節共通高さで下に空白が残った）
+	{
+		const fit = await L1.evaluate(() => {
+			const cs = [...document.querySelectorAll('.cal-cell.cal-list')].filter(c => c.offsetHeight > 0);
+			const det = cs.map(c => { const rows = c.querySelectorAll('.ir-lrow').length; const gap = c.offsetHeight - (26 + 10 + 4 + rows * 96); return { rows, h: c.offsetHeight, gap }; });
+			return { pass: det.length > 0 && det.every(x => x.gap >= 40 && x.gap <= 56), det };
+		});
+		ck('l51SecFit', fit.pass, JSON.stringify(fit.det).slice(0, 200));
+	}
 		ck('l51Cells', i51.rows.length >= 2 && i51.rows[0].nm.endsWith('.png') && i51.rows[0].uid.startsWith('LSU') && i51.rows[0].uid.includes('\uFF08\u81EA\u5206\uFF09') && /\d{2}:\d{2}/.test(i51.rows[0].dt) && i51.rows[0].tg.includes('alpha') && /^[0-9A-Za-z_-]{16,}$/.test(i51.rows[0].hs), JSON.stringify(i51.rows[0] && i51.rows[0].uid));
 	// v2.25: ヘッダーとリスト本文の隙間 10px 程度
 	ck('l51Gap', await L1.evaluate(() => {
@@ -394,15 +403,16 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	await K1.fill('input[name="ir-cuid"]', 'PONTA');
 	await K1.fill('input[name="ir-cpw"]', 'k57-pw');
 	await K1.click('.ir-frm button:has-text("\u90E8\u5C4B\u4F5C\u6210")');
-	await K1.waitForFunction(() => { const e = document.querySelector('.ir-crinfo'); return !!e && e.textContent.includes('\u672C\u4EBA') && e.textContent.includes('\u7F72\u540D\u4E00\u81F4'); }, null, { timeout: 150000, polling: 500 }).catch(async () => {
-		console.log('badge57Dbg:', JSON.stringify(await K1.evaluate(async () => {
+	await K1.waitForFunction(() => { const s0 = document.querySelector('.ir-crsub'); const c0 = document.querySelector('.ir-pc'); return !!s0 && s0.textContent.includes('PONTA') && !!c0 && c0.closest('.ir-pbadge') && (c0.closest('.ir-pbadge').textContent || '').includes('PONTA'); }, null, { timeout: 90000, polling: 500 }).catch(async () => {
+		console.log('badge57Dbg:', JSON.stringify(await K1.evaluate(() => {
 			const app = window.__IRAPP, c = app && app.activeCtx();
 			if (!c) return 'nctx';
-			const k = await app._crKeysLoad(c.rid);
-			return { authed: !!(c.session && c.session.state && c.session.state.authed), cr: c.room.cr, uid: c.uid, hasCI: !!c._crInfo, self: c._crInfo && c._crInfo.self, roomCl: (c.room.claim || '').slice(0, 16), keysCl: k && (k.claim || '').slice(0, 16), sc: await app._crSelfCheck(c, (c.room && c.room.claim) || (c._crInfo && c._crInfo.claim) || (k && k.claim) || ''), wsBase: app.cfg && app.cfg.WSBASE, crinfoEls: document.querySelectorAll('.ir-crinfo').length, crText: (document.querySelector('.ir-crinfo') || {}).textContent || 'NONE', afterPaint: (app.paintCr(c), (document.querySelector('.ir-crinfo') || {}).textContent || 'NONE'), partsEl: !!c.partsEl, view: JSON.stringify(app.view), active: app.active === c.rid, body: document.body.innerText.slice(0, 130).replace(/\s+/g, ' ') };
+			return { authed: !!(c.session && c.session.state && c.session.state.authed), cr: c.room.cr, uid: c.uid, self: c._crInfo && c._crInfo.self, crsub: (document.querySelector('.ir-crsub') || {}).textContent || 'NONE', pc: document.querySelectorAll('.ir-pc').length, view: JSON.stringify(app.view), body: document.body.innerText.slice(0, 130).replace(/\s+/g, ' ') };
 		})).slice(0, 400));
 	});
-	ck('badgeSelf', true); // (待機 40s: 連続ループ負荷でのサーバ PBKDF2 認証遅延対策)
+	ck('crSubShown', await K1.evaluate(() => { const e = document.querySelector('.ir-crsub'); return !!e && e.textContent.includes('\u4f5c\u6210\u8005') && e.textContent.includes('PONTA'); }));
+	ck('crBadgeInParts', await K1.evaluate(() => { const c0 = document.querySelector('.ir-pc'); return !!c0 && !!c0.closest('.ir-pbadge'); }));
+	ck('crInfoGoneK1', await K1.evaluate(() => document.querySelectorAll('.ir-crinfo').length === 0)); // (待機 40s: 連続ループ負荷でのサーバ PBKDF2 認証遅延対策)
 	const menuSel = 'button[aria-label="\u90E8\u5C4B\u8A2D\u5B9A"]'; // evaluate/locator 兼用（:has-text は CSS ではない）
 	ck('menuVisible', await K1.evaluate(sel => { const b = document.querySelector(sel); return !!b && getComputedStyle(b).display !== 'none'; }, menuSel));
 	await K1.click(menuSel);
@@ -436,15 +446,17 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	await K2.fill('input[name="ir-pw"]', 'k57-pw');
 	await K2.click('.ir-frm button.ir-bigbtn');
 	await K2.waitForFunction(() => { const c = window.__IRAPP && window.__IRAPP.activeCtx(); return !!(c && c.session && c.session.state && c.session.state.authed); }, null, { timeout: 75000, polling: 500 });
-	await K2.waitForFunction(() => { const e = document.querySelector('.ir-crinfo'); return !!e && e.textContent.includes('\u7F72\u540D'); }, null, { timeout: 40000, polling: 500 }).catch(async () => {
+	await K2.waitForFunction(() => { const s0 = document.querySelector('.ir-crsub'); const c0 = document.querySelector('.ir-pc'); return !!s0 && s0.textContent.includes('PONTA') && !!c0; }, null, { timeout: 60000, polling: 500 }).catch(async () => {
 		console.log('badge57bDbg:', JSON.stringify(await K2.evaluate(() => {
 			const app = window.__IRAPP, c = app && app.activeCtx();
 			if (!c) return 'nctx';
-			return { cr: c.room.cr, uid: c.uid, hasCI: !!c._crInfo, self: c._crInfo && c._crInfo.self, rr: !!c.partsEl, els: document.querySelectorAll('.ir-crinfo').length, view: JSON.stringify(app.view), active: app.active === c.rid, body: document.body.innerText.slice(0, 110).replace(/\s+/g, ' ') };
+			return { cr: c.room.cr, uid: c.uid, self: c._crInfo && c._crInfo.self, crsub: (document.querySelector('.ir-crsub') || {}).textContent || 'NONE', pc: document.querySelectorAll('.ir-pc').length, view: JSON.stringify(app.view), body: document.body.innerText.slice(0, 110).replace(/\s+/g, ' ') };
 		})).slice(0, 400));
 	});
-	const k2t = await K2.evaluate(() => (document.querySelector('.ir-crinfo') || {}).textContent || '');
-	ck('pancoNoSelf', !k2t.includes('\u672C\u4EBA') && k2t.includes('\u7F72\u540D\u4E00\u81F4'), k2t.replace(/\s+/g, ' '));
+	// v2.33 §60: 「（署名一致）」系バッジは全廃。ヘッダーはグレーの「作成者 xxx」のみ（K2 視点）
+	ck('badgeRemovedK2', await K2.evaluate(() => document.querySelectorAll('.ir-crinfo').length === 0 && !document.body.innerText.includes('\u7f72\u540d\u4e00\u81f4')));
+	ck('crSubShownK2', await K2.evaluate(() => { const e = document.querySelector('.ir-crsub'); return !!e && e.textContent.includes('PONTA') && !e.textContent.includes('\u7f72\u540d'); }));
+	ck('crBadgeInPartsK2', await K2.evaluate(() => document.querySelectorAll('.ir-pc').length >= 1));
 	ck('pancoMenuHidden', await K2.evaluate(sel => { const b = document.querySelector(sel); return !b || getComputedStyle(b).display === 'none'; }, menuSel));
 	await K2.click('button:has-text("\u30ED\u30B0\u30A2\u30A6\u30C8")').catch(() => {}); // §57: roster 残骸を残さない
 	await K2.waitForTimeout(1000);
@@ -585,10 +597,10 @@ ck('sMark', await B.evaluate(() => {
 }));
 ck('joinTimes', await B.evaluate(() => {
 	const ps = window.__IRAPP.activeCtx().session.state.participants;
-	const bs = [...document.querySelectorAll('.ir-pbadge')].map(x => x.textContent.replace('S', ''));
+	const bs = [...document.querySelectorAll('.ir-pbadge')].map(x => x.textContent.replace('S', '').replace('\u{1F451}', '')); // v2.33 §60: 作成者 crown マークも飾りとして除去
 	const a = ps.find(p => p.uid === 'PONTA'), b2 = ps.find(p => p.uid === 'PONKO');
 	return ps.length >= 2 && ps.every(p => Number.isFinite(p.t)) && !!a && !!b2 && a.t <= b2.t && bs[0] === 'PONTA';
-}));
+}), await B.evaluate(() => JSON.stringify({ bs: [...document.querySelectorAll('.ir-pbadge')].map(x => x.textContent), ps: window.__IRAPP.activeCtx().session.state.participants.map(p => [p.uid, p.t]) })));
 // mx 配信（C）: B 側 room.mx = 1MB
 await B.waitForFunction(() => window.__IRAPP.activeCtx().room.mx === 1048576, null, { timeout: 15000 }).catch(() => {});
 ck('mxDelivered', await B.evaluate(() => window.__IRAPP.activeCtx().room.mx === 1048576));
@@ -1858,13 +1870,13 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 			self: await window.__IRAPP._crSelfCheck(c),
 			url: window.__IRAPP.roomUrl(c),
 			info: c._crInfo && { ok: c._crInfo.ok, cr: c._crInfo.cr, self: c._crInfo.self },
-			badge: document.querySelector('.ir-parts .ir-crinfo')?.textContent || '',
+			badge: document.querySelector('.ir-crsub')?.textContent || '', // v2.33 §60: ヘッダー部屋名下のグレー行
 		};
 	});
 	ck('crKeyFile', crd.keyFile); // 作成時に鍵組+署名が OPFS keys/<rid>.json へ保存
 	ck('crSelfMatch', crd.self === true); // 署名再作成→公開鍵検証一致で作成者認定
 	ck('crInfoSelf', !!(crd.info && crd.info.ok && crd.info.self && crd.info.cr === 'PONTA'));
-	ck('crBadgeHdr', crd.badge.includes('PONTA') && crd.badge.includes('署名一致'));
+	ck('crBadgeHdr', crd.badge.includes('PONTA') && !crd.badge.includes('署名')); // v2.33 §60: 「（署名一致）」廃止・「作成者 xxx」のみ
 	const seg = crd.url.split('#')[1].split(':');
 	ck('crUrlClaim', seg.length === 3 && /^[0-9]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(seg[2]));
 	ck('crAnchorVerify', await A.evaluate(async cl => { // 第三者検証: nm(平文)+uid+ct の JSON ダイジェスト署名を公開鍵で検証

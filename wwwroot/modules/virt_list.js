@@ -16,7 +16,11 @@ export class VirtList {
 	// scroll は passive 登録 + TL ms スロットル。窓端を跨ぐたびに窓は 1 ページずつ進む。
 	constructor(opt = {}) {
 		this.ct = opt.container;
-		this.pg = opt.page > 0 ? opt.page : 256; // ページ（アイテム 1 枠）高さ px
+		// v2.33 §60: page に関数 (i)=>px を渡すとセクション可変高さ（高さの前置和 _off で窓計算）
+		this.pgFn = typeof opt.page === 'function' ? opt.page : null;
+		this.pg = this.pgFn ? 0 : opt.page > 0 ? opt.page : 256; // ページ（アイテム 1 枠）高さ px（固定）
+		this._off = new Float64Array(1); // 高さの累積（refresh で再構築）
+		this._tot = 0;
 		this.wp = opt.winPages > 0 ? opt.winPages : 3; // 窓ページ数（CAL_WINDOW_PAGES 既定）
 		this.fnC = opt.count || (() => 0);
 		this.fnR = opt.render || null;
@@ -36,10 +40,35 @@ export class VirtList {
 		window.addEventListener('scroll', this.ws, { passive: true });
 		this.refresh();
 	}
-	refresh() {
+	hp(i) {
+		return Math.max(1, this.pgFn ? this.pgFn(i) : this.pg);
+	}
+	build() {
+		// 高さの前置和キャッシュ（refresh 時に再構築。可変高さの窓/配置はここから求める）
+		const n = Math.max(0, this.fnC());
+		if (this._off.length < n + 1) this._off = new Float64Array(n + 1);
+		for (let i = 0; i < n; i++) this._off[i + 1] = this._off[i] + this.hp(i);
+		this._tot = this._off[n];
+	}
+	pageAt(px) {
+		// px を含むページ = 最大の i（_off[i] <= px）。固定高さでは floor(px/pg) と同値
+		let lo = 0,
+			hi = Math.max(0, this.fnC() - 1);
+		while (lo < hi) {
+			const m = (lo + hi + 1) >> 1;
+			if (this._off[m] <= px) lo = m;
+			else hi = m - 1;
+		}
+		return lo;
+	}
+	refresh(force) {
 		// spacer 再確保 + 窓再評価（count 変化時に呼ぶ。窓内の既存 DOM は保持し窓外のみに削除/生成）
+		// v2.33 §60: force=true で窓内も全再作成（セクション内容変化=+N 展開など）。既定は枠位置/高さだけ再適用
 		if (this.dead) return;
-		if (this.sp) Vw.sS(this.sp, { height: `${Math.max(0, this.fnC()) * this.pg}px` });
+		this.build();
+		if (this.sp) Vw.sS(this.sp, { height: `${Math.max(0, this._tot)}px` });
+		if (force) for (const i of [...this.els.keys()]) this.ev(i);
+		else for (const [i, el] of this.els) Vw.sS(el, { top: `${this._off[i]}px`, height: `${this.hp(i)}px` });
 		this.lo = this.hi = -1; // 強制再評価（既存窓内 DOM は upd() の has() で再利用される）
 		this.upd();
 	}
@@ -85,7 +114,7 @@ export class VirtList {
 		const mx = n - 1; // 最終ページ（アイテム総数 = ページ総数）
 		let cur;
 		const st = (this.ct && this.ct.scrollTop) || 0;
-		if (st) cur = Math.floor(st / this.pg);
+		if (st) cur = this.pageAt(st);
 		else {
 			// v1.5 §19: 容器が高さ非拘束（spacer が箱を伸長させページ全体がスクロールする）レイアウトでは
 			// scrollTop が常に 0 で窓が進まない。箱の viewport 上位置（rect.top の負方向）から現在ページを求める
@@ -93,8 +122,8 @@ export class VirtList {
 			// 窓は「最初に見えるページ」を下限に、ビューポート下端のページを必ず覆う中央位置へ（下端到達で末尾ページが窓から漏れない）
 			if (r) {
 				const vh = (this.ct && this.ct.ownerDocument && this.ct.ownerDocument.documentElement.clientHeight) || 844,
-					first = Math.floor(Math.max(0, -r.top) / this.pg),
-					last = Math.floor(Math.max(0, vh - r.top) / this.pg);
+					first = this.pageAt(Math.max(0, -r.top)),
+					last = this.pageAt(Math.max(0, vh - r.top));
 				cur = Math.max(first, last - Math.floor(this.wp / 2));
 			} else cur = 0;
 		}
@@ -105,6 +134,11 @@ export class VirtList {
 			hi = cur + (this.wp - 1 - h);
 		if (lo < 0) hi += -lo; // 先頭端: 窓幅を削らず前に寄せる
 		hi = Math.min(hi, mx);
+		if (this.pgFn) {
+			// 可変高さ: セクションが低くても窓がビューポート高を覆い切るまで後ろへ延ばす（下端の取りこぼし防止）
+			const vh = (this.ct && this.ct.ownerDocument && this.ct.ownerDocument.documentElement.clientHeight) || 844;
+			while (hi < mx && this._off[hi + 1] - this._off[cur] < vh + 50) hi++;
+		}
 		lo = Math.min(Math.max(lo, 0), hi);
 		if (lo === this.lo && hi === this.hi) return; // 窓端を跨いでいない: 窓は進めない
 		for (const i of [...this.els.keys()]) if (i < lo || i > hi) this.ev(i);
@@ -127,8 +161,8 @@ export class VirtList {
 			position: 'absolute',
 			left: '0',
 			width: '100%',
-			top: `${i * this.pg}px`,
-			height: `${this.pg}px`,
+			top: `${this._off[i]}px`,
+			height: `${this.hp(i)}px`,
 		});
 		this.els.set(i, el);
 		this.sp.appendChild(el);

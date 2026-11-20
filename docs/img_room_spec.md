@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.32
+- ステータス: ドラフト v2.33
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1675,3 +1675,20 @@ D) QR PNG 復号: アプリ QRTool で生成した `TMIWR1:` QR を canvas→jsQ
 - 実態に基づく対応表: **OPFS**（`bodies/<hash>`・`meta/…jsonl`・`trash/`・`room.json`・`keys/<rid>.json`・`claim/<rid>.json`・`tagreg/`）／**IndexedDB**（二次索引 `imgroom_tagidx` のみ・再生成可能）／**localStorage**（接続設定・言語・参加日時・sweep 日付・退避暗号文）／**sessionStorage**（退避復鍵・タブ固有）／メモリ（サムネイル一時バイト）。**Cookie・Service Worker 不使用**を明記。
 - 消去手順 3 系統: (1) ブラウザのサイトデータ削除 (2) DevTools Application → Storage →「ストレージを消去」（OPFS は File System Access/Origin Private File System ノードで個別確認可）(3) アプリ内（ゴミ箱☓完全削除・⚙️ 部屋削除・trash 30 日自動掃除 §9.8）。**同一写真を他端末が持つ場合の復活**（コンテンツアドレス）と、**オリジン単位**（github.io vs LAN IP）と**鍵の退避→移行**を注記。
 - landing の版数表示をフッタ含む v2.32 に同期（此前 v2.30 据わりの表示漏れ修正）。Setup.md へ相互リンク。 保存エリアは実パス準拠で `rooms/<rid>/room.json`（部屋単位）／`keys|claim|tagreg/<rid>.json`（ルートの相対）。検証で mobileOverflow が出たため `overflow-wrap:anywhere` + 640px 以下で表をカード積み重ねへ（mobileOverflow: false 再確認）。検証: verify-landing.mjs に保存節キーワード検査（OPFS/IndexedDB/localStorage/ストレージを消去/秘密鍵）追加・外部 http リンクは実在チェック除外。
+
+## §60（v2.33 追加）: 作成者バッジの参加者列化・ヘッダーの小さな作成者行・日別リストの実件数高さ
+
+### 要求
+- 作成者マークは**参加者バッジの中に**つける。
+- 現在の「作成者 xxx（署名一致）」表示は**削除**し、**ヘッダーの部屋名の下に小さなグレーで「作成者 xxx」のみ**。
+- 日別リストのサムネイル下に残る**サムネイル 1 個分の空白**を、**0.5 行の隙間**へ。
+
+### 実装
+- **参加者バッジ**: `paintParts` で `pt.uid === room.cr` のバッジに `Badge(b,'ir-pc','👑')`（S マークと同じ装飾スパン方式）。`room.cr` の更新（C 受信・cr イベント・J 名乗り）で再描画経路に乗る。CSS は金色。
+- **ヘッダー作成者行**: `paintCr` を全面書き換え。参加者行末尾の `.ir-crinfo` バッジ（自認/検証文言込み）は**廃止**。ヘッダーの部屋名（b）を `.ir-hdc`（縦カラム）で包み、下に `.ir-crsub`（小グレー・省略ellipsis）で「作成者: xxx」のみ表示。view=room かつ room.cr 確定時のみ表示。home のログイン画面にあるクレーム検証行（`.ir-crinfo` を再利用）は別物なので維持。**self/署名検証の内部判定は部屋設定ボタンの表示条件として据え置き**（§57 のロジックは無傷、表示のみ削除）。
+- **日別リスト（CalView list）の実件数高さ**:
+  - **VirtList** に `page: (i)=>px` 関数形式を追加。高さの**前置和 `_off`（Float64Array）を refresh で再構築**し、現在ページ=二分探索、窓はビューポート高を覆い切るまで後方へ延長、枠の top/height はセクション実高。`refresh(force)` で窓内も全再作成（+N 展開で枠高も変わるため）。固定高さ呼び出しは従来と同一動作。
+  - **CalView** list モード: `secPx(i) = HH + 10 + 4 + 実表示件数 × lrh + 0.5 × lrh`（**節間隔 0.5 行**）。`+N 件`展開は `vl.refresh(true)` へ変更。
+  - **空アンカー单元の除去**: buildSec は今日/単位アンカーの空单元を追加していたが、list では「見出し+全高空白」の幽霊セクション（＝ユーザー観測の 1 個分空白の主因）になっていた。list モードでは `v.length===0` の单元を除外。
+- テスト（img-spec）: §51 に **l51SecFit**（各 list セクションの枠高−(ヘッダ+実行×96) が 48±8px）を追加＝可変高さ+0.5 行の回帰固定。§57 は **crSubShown/crBadgeInParts/crInfoGoneK1**（作成者行・👑・バッジ廃止）と **badgeRemovedK2/crSubShownK2/crBadgeInPartsK2**（別端末参加視点）に更新。v1.1 の joinTimes・v2.20 の crBadgeHdr は新装飾/新表示に合わせて修正（バッジ textContent 検査は `S`/`👑` を除去して比較）。
+- 教訓: ①JS の `\U0001F451` は無効エスケープで**リテラル 'U0001F451' 文字列**になる（emoji は `\u{1F451}` か直書き。python r-string 経由のパッチで `\U` を混ぜるとテスト text 検査で発覚）。②可変高さ化は**窓の被覆長**（低セクションで窓が足りず下端が消える）と**セクション枠高さの再適用**（+N 展開）が必須。③仮想リストの幽霊空セクションは固定高さでは目立たず、実件数高さで初めて空白として可視化する。
