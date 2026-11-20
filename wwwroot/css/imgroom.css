@@ -911,6 +911,10 @@ input[type="file"]:active::file-selector-button {
 	gap: 6px;
 	margin: 6px 0;
 	cursor: pointer;
+	/* v2.34 §61: 記憶チェックと行ラベルを同一行・行背景をほんのり明るく */
+	background: rgba(255, 255, 255, .07);
+	border-radius: 6px;
+	padding: 6px 8px;
 }
 
 /* ==== v2.24 §51: リスト表示モード / トグルスイッチ / タグバッジ ==== */
@@ -952,7 +956,15 @@ input[type="file"]:active::file-selector-button {
 
 /* v2.30 §57: ログイン/作成 submit 拡大+明色、鍵移動は右下 */
 .ir-hdc { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
-.ir-crsub { font-size: .64em; font-weight: 400; color: #8a94a6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ir-tabt { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2; min-width: 0; }
+.ir-tabcr { font-size: .72em; color: #8a94a6; font-weight: 400; white-space: nowrap; }
+.ir-ptm { display: none; margin-left: 5px; padding: 1px 6px; border-radius: 4px; background: #33507e; color: #cfe3ff; font-size: .82em; white-space: nowrap; }
+.ir-pbadge.showt .ir-ptm { display: inline-block; }
+.ir-keyrow { flex-wrap: wrap; align-items: center; gap: 8px; }
+.ir-keylbl { color: #cfd8e6; font-weight: 600; margin-right: auto; }
+.ir-keybtn { background: #2f6fb8; border-color: #245a97; color: #fff; font-weight: 600; }
+.ir-keybtn:hover { background: #3f82d0; }
+.ir-remline { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,.07); border-radius: 6px; padding: 6px 8px; }
 .ir-pc { color: #e8b34b; font-weight: 700; }
 .ir-bigbtn { font-size: 1.9em; padding: 0.55em 1.5em; background: #4a9eff; border-color: #2f7fd1; color: #fff; }
 .ir-bigbtn:hover { background: #6fb4ff; border-color: #4a9eff; }

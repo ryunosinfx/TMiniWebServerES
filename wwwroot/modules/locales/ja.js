@@ -129,6 +129,8 @@ export default {
 	'msg.room.del': '永久に削除しますがよいですか？',
 	'lbl.room.imgs': '{n} 枚',
 	'lbl.cr': '作成者:',
+	'lbl.cr.role': '部屋作成者',
+	'lbl.key.delegate': '部屋作者の移謠',
 	'lbl.cr.ok': '（署名一致）',
 	'lbl.cr.self': '（本人・署名一致）',
 	'lbl.cr.bad': '（署名不一致）',

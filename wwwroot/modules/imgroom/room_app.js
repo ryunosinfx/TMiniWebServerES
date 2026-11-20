@@ -294,15 +294,9 @@ export class RoomApp {
 		})().catch(e => ef(e, 'room_app.paintSelf'));
 	}
 	paintCr(ctx) {
-		// v2.33 §60: 「作成者 xxx（署名一致）」バッジは廃止。ヘッダーの部屋名下に小さなグレーで
-		// 「作成者 xxx」のみ表示（自認/検証結果の表示はない。self 判定は部屋設定ボタンの表示条件として内部維持）
-		const sub = this.hdEls && this.hdEls.crSub;
-		if (!sub) return;
-		const cr = ctx && ctx.room && ctx.room.cr;
-		if (cr && this.view && this.view.t === 'room') {
-			sub.style.display = '';
-			Vw.sT(sub, I18N.t('lbl.cr') + ' ' + cr);
-		} else sub.style.display = 'none';
+		// v2.34 §61: 作成者表記は部屋タブの部屋名下（.ir-tabcr）へ。自認/検証の表示はなし
+		// （self 判定は部屋設定ボタン表示条件として内部維持）。renderTabs 再起で反映
+		if (ctx) this.renderTabs();
 	}
 	qOverride() { // §11: GRID_COLS/GRID_ROWS/CAL_VIEW のみ（デバッグ用・永続化しない）
 		let p;
@@ -367,8 +361,6 @@ export class RoomApp {
 		const e = (this.hdEls = {});
 		e.hdc = Vw.add(this.hd, 'span', { class: 'ir-hdc' }); // v2.33 §60: 部屋名下に作成者サブ行
 		e.title = Vw.add(e.hdc, 'b');
-		e.crSub = Vw.add(e.hdc, 'span', { class: 'ir-crsub' });
-		e.crSub.style.display = 'none';
 		e.usage = Vw.add(this.hd, 'span', { class: 'ir-mut' }); // §9.11 使用量
 		e.modeWrap = Vw.div(this.hd, { class: 'ir-row' }); // §5.2 モード切替（server では非表示）
 		// v2.2 §26 → v2.14 §41: ログイン画面でもモード選択可（通常都度/取得保持/同期の select。server セッションでは非表示のまま）
@@ -461,7 +453,9 @@ export class RoomApp {
 		for (const [rid, ctx] of this.rooms) {
 			const on = rid === this.active;
 			const b = Vw.btn(this.tabsEl, { class: 'ir-tab' + (on ? ' on' : '') });
-			Vw.add(b, 'span').textContent = ctx.title;
+			const tw = Vw.add(b, 'span', { class: 'ir-tabt' });
+			Vw.add(tw, 'span').textContent = ctx.title;
+			if (ctx.room.cr) Vw.add(tw, 'span', { class: 'ir-tabcr' }).textContent = I18N.t('lbl.cr') + ' ' + ctx.room.cr; // v2.34 §61
 			const st = ctx.session.state || {};
 			Badge(b, st.online ? 'ir-bdgon' : 'ir-bdgoff', st.online ? 'ON' : 'OFF');
 			if (st.mirror) Badge(b, 'ir-bdg', 'M');
@@ -784,12 +778,32 @@ export class RoomApp {
 		for (const m of Object.keys(radios)) Vw.ael(radios[m], 'change', paintSay);
 		applySel((room && room.nm) || preNb || this.pendingNb || (nmIn.value.trim() ? RoomApp.nb(nmIn.value.trim()) : ''));
 		Vw.ael(nmIn, 'input', () => applySel(RoomApp.nb(nmIn.value.trim()) || '')); // 部屋名入力に追従
+		const row = Vw.div(f, { class: 'ir-row' });
+		const go = Vw.btn(row, { class: 'ir-btn ir-bigbtn', type: 'button' }); // v2.15 §42 / v2.30 §57: ログイン拡大+明色 type=button + form submit で Enter 対応
+		Vw.sT(go, t('btn.login'));
 		{ // v2.23 §50: 作成者秘密鍵ファイル（添付してログイン→移譲取得）。
 		  // 常時 input[type=file] を置くと「部屋が開いた」判定セレクタ（テスト/他 UI）と衝突するため、
 		  // ボタン押下時のみ file input を生成する段階開示にする
-			const keyRow = Vw.add(f, 'div', { class: 'ir-remline' }),
-				kb = Vw.btn(keyRow, { class: 'ir-btn', type: 'button' });
+			const keyRow = Vw.add(f, 'div', { class: 'ir-keyrow' }); // v2.34 §61: 「部屋作者の移謠」行（鍵ファイルを選ぶ / 秘密鍵の移動）
+			Vw.add(keyRow, 'span', { class: 'ir-keylbl' }).textContent = t('lbl.key.delegate');
+			const kb = Vw.btn(keyRow, { class: 'ir-btn ir-keybtn', type: 'button' });
 			Vw.sT(kb, t('btn.key.pick'));
+	const kmv = Vw.btn(keyRow, { class: 'ir-btn ir-keybtn ir-keymv', type: 'button' });
+	Vw.sT(kmv, t('btn.key.move'));
+	Vw.click(kmv, () => {
+		(async () => {
+			const nb0 = room && room.nm ? room.nm : (nmIn.value.trim() ? RoomApp.nb(nmIn.value.trim()) : '');
+			const rid = (room && room.rid) || (nb0 ? await this.ridOfNb(nb0) : '');
+			if (!rid) {
+				Toast(t('msg.key.none'));
+				return;
+			}
+			await this._keyDl({ rid });
+		})().catch(e => {
+			ef(e, 'room_app.keyMv');
+			Toast(t('msg.key.none'));
+		});
+	});
 			const tip = Vw.add(keyRow, 'span', { class: 'ir-mut' });
 			Vw.click(kb, () => {
 				if (keyRow.querySelector('input[type=file]')) return;
@@ -822,31 +836,11 @@ export class RoomApp {
 			});
 			}); // Vw.click(kb) 終端
 		}
-		const row = Vw.div(f, { class: 'ir-row' });
-		const go = Vw.btn(row, { class: 'ir-btn ir-bigbtn', type: 'button' }); // v2.15 §42 / v2.30 §57: ログイン拡大+明色 type=button + form submit で Enter 対応
-		Vw.sT(go, t('btn.login'));
 		Vw.ael(f, 'submit', e => {
 			e.preventDefault();
 			doLogin(); // v2.22 §49: submit が単一入口（ボタン経由も requestSubmit で submit を発火→ブラウザのパスワードマネージャが保存検知）
 		});
 		Vw.click(go, () => f.requestSubmit());
-		const keyRow = Vw.div(f, { class: 'ir-keyrow' }); // v2.30 §57: ログイン画面右下の秘密鍵移動（ダウンロード）
-		const kmv = Vw.btn(keyRow, { class: 'ir-btn ir-keymv', type: 'button' });
-		Vw.sT(kmv, t('btn.key.move'));
-		Vw.click(kmv, () => {
-			(async () => {
-				const nb0 = room && room.nm ? room.nm : (nmIn.value.trim() ? RoomApp.nb(nmIn.value.trim()) : '');
-				const rid = (room && room.rid) || (nb0 ? await this.ridOfNb(nb0) : '');
-				if (!rid) {
-					Toast(t('msg.key.none'));
-					return;
-				}
-				await this._keyDl({ rid });
-			})().catch(e => {
-				ef(e, 'room_app.keyMv');
-				Toast(t('msg.key.none'));
-			});
-		});
 		const doLogin = () => { // (ボタン→requestSubmit→上記 submit→doLogin の順で必ず 1 回)
 			const nmRaw = nmIn.value.trim();
 			const nb = room && room.nm ? room.nm : (nmRaw ? RoomApp.nb(nmRaw) : '');
@@ -1606,6 +1600,9 @@ export class RoomApp {
 				Vw.add(b, 'span').textContent = pt.uid;
 				if (pt.md === 'server') Badge(b, 'ir-ps', 'S');
 				if (ctx.room.cr && pt.uid === ctx.room.cr) Badge(b, 'ir-pc', '\u{1F451}'); // v2.33 §60: 作成者バッジ（参加者列の中で明示）
+				const tm = Vw.add(b, 'span', { class: 'ir-ptm' }); // v2.34 §61: クリックで参加時刻（別背景）をバッジ内に切り替え表示。再クリックで元へ
+				tm.textContent = (pt.t ? new Date(pt.t).toLocaleString() : '?') + (ctx.room.cr && pt.uid === ctx.room.cr ? ' · ' + I18N.t('lbl.cr.role') : '');
+				Vw.ael(b, 'click', () => b.classList.toggle('showt'));
 				b.title = t('lbl.part.join') + ': ' + (pt.t ? new Date(pt.t).toLocaleString() + ' (' + pt.t + ')' : '?');
 			}
 		};

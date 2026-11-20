@@ -129,6 +129,8 @@ export default {
 	'msg.room.del': 'Permanently delete. Are you sure?',
 	'lbl.room.imgs': '{n} imgs',
 	'lbl.cr': 'Creator:',
+	'lbl.cr.role': 'Room creator',
+	'lbl.key.delegate': 'Room creator transfer',
 	'lbl.cr.ok': '(signature ok)',
 	'lbl.cr.self': '(you・signature ok)',
 	'lbl.cr.bad': '(signature mismatch)',

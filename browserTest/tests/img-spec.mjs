@@ -403,16 +403,23 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	await K1.fill('input[name="ir-cuid"]', 'PONTA');
 	await K1.fill('input[name="ir-cpw"]', 'k57-pw');
 	await K1.click('.ir-frm button:has-text("\u90E8\u5C4B\u4F5C\u6210")');
-	await K1.waitForFunction(() => { const s0 = document.querySelector('.ir-crsub'); const c0 = document.querySelector('.ir-pc'); return !!s0 && s0.textContent.includes('PONTA') && !!c0 && c0.closest('.ir-pbadge') && (c0.closest('.ir-pbadge').textContent || '').includes('PONTA'); }, null, { timeout: 90000, polling: 500 }).catch(async () => {
+	await K1.waitForFunction(() => { const s0 = document.querySelector('.ir-tabcr'); const c0 = document.querySelector('.ir-pc'); return !!s0 && s0.textContent.includes('PONTA') && !!c0 && c0.closest('.ir-pbadge') && (c0.closest('.ir-pbadge').textContent || '').includes('PONTA'); }, null, { timeout: 90000, polling: 500 }).catch(async () => {
 		console.log('badge57Dbg:', JSON.stringify(await K1.evaluate(() => {
 			const app = window.__IRAPP, c = app && app.activeCtx();
 			if (!c) return 'nctx';
-			return { authed: !!(c.session && c.session.state && c.session.state.authed), cr: c.room.cr, uid: c.uid, self: c._crInfo && c._crInfo.self, crsub: (document.querySelector('.ir-crsub') || {}).textContent || 'NONE', pc: document.querySelectorAll('.ir-pc').length, view: JSON.stringify(app.view), body: document.body.innerText.slice(0, 130).replace(/\s+/g, ' ') };
+			return { authed: !!(c.session && c.session.state && c.session.state.authed), cr: c.room.cr, uid: c.uid, self: c._crInfo && c._crInfo.self, crsub: (document.querySelector('.ir-tabcr') || {}).textContent || 'NONE', pc: document.querySelectorAll('.ir-pc').length, view: JSON.stringify(app.view), body: document.body.innerText.slice(0, 130).replace(/\s+/g, ' ') };
 		})).slice(0, 400));
 	});
-	ck('crSubShown', await K1.evaluate(() => { const e = document.querySelector('.ir-crsub'); return !!e && e.textContent.includes('\u4f5c\u6210\u8005') && e.textContent.includes('PONTA'); }));
+	ck('crSubShown', await K1.evaluate(() => { const e = document.querySelector('.ir-tabcr'); return !!e && e.textContent.includes('\u4f5c\u6210\u8005') && e.textContent.includes('PONTA'); }));
 	ck('crBadgeInParts', await K1.evaluate(() => { const c0 = document.querySelector('.ir-pc'); return !!c0 && !!c0.closest('.ir-pbadge'); }));
-	ck('crInfoGoneK1', await K1.evaluate(() => document.querySelectorAll('.ir-crinfo').length === 0)); // (待機 40s: 連続ループ負荷でのサーバ PBKDF2 認証遅延対策)
+	ck('crInfoGoneK1', await K1.evaluate(() => document.querySelectorAll('.ir-crinfo').length === 0));
+	// v2.34 §61: 参加者バッジをクリック→参加時刻（別背景）+ 作成者は「部屋作成者」併記。再クリックで元へ
+	await K1.click('.ir-pbadge:has-text("PONTA")');
+	await K1.waitForTimeout(300);
+	ck('ptmShown', await K1.evaluate(() => { const e = document.querySelector('.ir-pbadge.showt .ir-ptm'); return !!e && getComputedStyle(e).display !== 'none' && e.textContent.includes('部屋作成者'); }));
+	ck('ptmBg', await K1.evaluate(() => { const e = document.querySelector('.ir-pbadge.showt .ir-ptm'); if (!e) return false; const bg = getComputedStyle(e).backgroundColor, pb = getComputedStyle(e.closest('.ir-pbadge')).backgroundColor; return bg !== 'rgba(0, 0, 0, 0)' && bg !== pb; }));
+	await K1.click('.ir-pbadge:has-text("PONTA")');
+	ck('ptmHidden', await K1.evaluate(() => !document.querySelector('.ir-pbadge.showt'))); // (待機 40s: 連続ループ負荷でのサーバ PBKDF2 認証遅延対策)
 	const menuSel = 'button[aria-label="\u90E8\u5C4B\u8A2D\u5B9A"]'; // evaluate/locator 兼用（:has-text は CSS ではない）
 	ck('menuVisible', await K1.evaluate(sel => { const b = document.querySelector(sel); return !!b && getComputedStyle(b).display !== 'none'; }, menuSel));
 	await K1.click(menuSel);
@@ -431,9 +438,12 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	await K1.waitForSelector('.ir-frm input[name="ir-nm"]', { timeout: 45000 });
 	const st1 = await K1.evaluate(() => { const b = document.querySelector('.ir-frm button.ir-bigbtn'); if (!b) return null; const s = getComputedStyle(b); return { fs: s.fontSize, bg: s.backgroundColor }; });
 	ck('bigLoginBtn', !!st1 && parseFloat(st1.fs) >= 21 && st1.bg.includes('74, 158, 255'), JSON.stringify(st1));
-	const kmvBox = await K1.evaluate(() => { const k = document.querySelector('.ir-keyrow button'); const f = document.querySelector('.ir-frm'); if (!k || !f) return null; const kr = k.getBoundingClientRect(), fr = f.getBoundingClientRect(); return kr.left + kr.width / 2 > fr.left + fr.width * 0.5 && kr.bottom > fr.top + fr.height * 0.6; });
+	// v2.34 §61: 「部屋作者の移譲」行（鍵を選ぶ＋秘密鍵の移動が同一行・濃背景）と記憶行（同一行・薄背景）
+	ck('keyRowLine', await K1.evaluate(() => { const bs = [...document.querySelectorAll('.ir-keyrow button')]; if (bs.length < 2) return false; const t0 = bs[0].getBoundingClientRect().top; const lb = document.querySelector('.ir-keyrow .ir-keylbl'); const dark = bs.every(x => { const c = getComputedStyle(x).backgroundColor; return c !== 'rgba(0, 0, 0, 0)' && c !== 'rgb(32, 39, 54)'; }); return bs.every(x => Math.abs(x.getBoundingClientRect().top - t0) < 6) && !!lb && (lb.textContent || '').includes('部屋作者の移謠') && dark; }));
+	ck('remRow', await K1.evaluate(() => { const lb = document.querySelector('label.ir-remline'); if (!lb) return false; const i0 = lb.querySelector('input[type=checkbox]'), sp = lb.querySelector('span'); if (!i0 || !sp) return false; const ra = i0.getBoundingClientRect(), rb = sp.getBoundingClientRect(); return Math.abs(ra.top - rb.top) < 12 && getComputedStyle(lb).backgroundColor !== 'rgba(0, 0, 0, 0)'; }));
+	const kmvBox = await K1.evaluate(() => { const k = document.querySelector('.ir-keyrow .ir-keymv'); const f = document.querySelector('.ir-frm'); if (!k || !f) return null; const kr = k.getBoundingClientRect(), fr = f.getBoundingClientRect(); return kr.left + kr.width / 2 > fr.left + fr.width * 0.5 && kr.bottom > fr.top + fr.height * 0.6; });
 	ck('keyMvBottomRight', !!kmvBox);
-	await K1.click('.ir-keyrow button');
+	await K1.click('.ir-keyrow .ir-keymv');
 	for (let i = 0; i < 12 && !keyFile; i++) await K1.waitForTimeout(500);
 	ck('keyMvDownload', keyFile.startsWith('imgroom-key-'), keyFile);
 	await K1.close();
@@ -446,16 +456,16 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	await K2.fill('input[name="ir-pw"]', 'k57-pw');
 	await K2.click('.ir-frm button.ir-bigbtn');
 	await K2.waitForFunction(() => { const c = window.__IRAPP && window.__IRAPP.activeCtx(); return !!(c && c.session && c.session.state && c.session.state.authed); }, null, { timeout: 75000, polling: 500 });
-	await K2.waitForFunction(() => { const s0 = document.querySelector('.ir-crsub'); const c0 = document.querySelector('.ir-pc'); return !!s0 && s0.textContent.includes('PONTA') && !!c0; }, null, { timeout: 60000, polling: 500 }).catch(async () => {
+	await K2.waitForFunction(() => { const s0 = document.querySelector('.ir-tabcr'); const c0 = document.querySelector('.ir-pc'); return !!s0 && s0.textContent.includes('PONTA') && !!c0; }, null, { timeout: 60000, polling: 500 }).catch(async () => {
 		console.log('badge57bDbg:', JSON.stringify(await K2.evaluate(() => {
 			const app = window.__IRAPP, c = app && app.activeCtx();
 			if (!c) return 'nctx';
-			return { cr: c.room.cr, uid: c.uid, self: c._crInfo && c._crInfo.self, crsub: (document.querySelector('.ir-crsub') || {}).textContent || 'NONE', pc: document.querySelectorAll('.ir-pc').length, view: JSON.stringify(app.view), body: document.body.innerText.slice(0, 110).replace(/\s+/g, ' ') };
+			return { cr: c.room.cr, uid: c.uid, self: c._crInfo && c._crInfo.self, crsub: (document.querySelector('.ir-tabcr') || {}).textContent || 'NONE', pc: document.querySelectorAll('.ir-pc').length, view: JSON.stringify(app.view), body: document.body.innerText.slice(0, 110).replace(/\s+/g, ' ') };
 		})).slice(0, 400));
 	});
 	// v2.33 §60: 「（署名一致）」系バッジは全廃。ヘッダーはグレーの「作成者 xxx」のみ（K2 視点）
 	ck('badgeRemovedK2', await K2.evaluate(() => document.querySelectorAll('.ir-crinfo').length === 0 && !document.body.innerText.includes('\u7f72\u540d\u4e00\u81f4')));
-	ck('crSubShownK2', await K2.evaluate(() => { const e = document.querySelector('.ir-crsub'); return !!e && e.textContent.includes('PONTA') && !e.textContent.includes('\u7f72\u540d'); }));
+	ck('crSubShownK2', await K2.evaluate(() => { const e = document.querySelector('.ir-tabcr'); return !!e && e.textContent.includes('PONTA') && !e.textContent.includes('\u7f72\u540d'); }));
 	ck('crBadgeInPartsK2', await K2.evaluate(() => document.querySelectorAll('.ir-pc').length >= 1));
 	ck('pancoMenuHidden', await K2.evaluate(sel => { const b = document.querySelector(sel); return !b || getComputedStyle(b).display === 'none'; }, menuSel));
 	await K2.click('button:has-text("\u30ED\u30B0\u30A2\u30A6\u30C8")').catch(() => {}); // §57: roster 残骸を残さない
@@ -597,7 +607,7 @@ ck('sMark', await B.evaluate(() => {
 }));
 ck('joinTimes', await B.evaluate(() => {
 	const ps = window.__IRAPP.activeCtx().session.state.participants;
-	const bs = [...document.querySelectorAll('.ir-pbadge')].map(x => x.textContent.replace('S', '').replace('\u{1F451}', '')); // v2.33 §60: 作成者 crown マークも飾りとして除去
+	const bs = [...document.querySelectorAll('.ir-pbadge')].map(x => { const u0 = x.querySelector('span'); return u0 ? u0.textContent : ''; }); // v2.34 §61: uid スパンのみ（S/👑/時刻トグル span は飾りとして除外）
 	const a = ps.find(p => p.uid === 'PONTA'), b2 = ps.find(p => p.uid === 'PONKO');
 	return ps.length >= 2 && ps.every(p => Number.isFinite(p.t)) && !!a && !!b2 && a.t <= b2.t && bs[0] === 'PONTA';
 }), await B.evaluate(() => JSON.stringify({ bs: [...document.querySelectorAll('.ir-pbadge')].map(x => x.textContent), ps: window.__IRAPP.activeCtx().session.state.participants.map(p => [p.uid, p.t]) })));
@@ -1870,7 +1880,7 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 			self: await window.__IRAPP._crSelfCheck(c),
 			url: window.__IRAPP.roomUrl(c),
 			info: c._crInfo && { ok: c._crInfo.ok, cr: c._crInfo.cr, self: c._crInfo.self },
-			badge: document.querySelector('.ir-crsub')?.textContent || '', // v2.33 §60: ヘッダー部屋名下のグレー行
+			badge: document.querySelector('.ir-tabcr')?.textContent || '', // v2.33 §60: ヘッダー部屋名下のグレー行
 		};
 	});
 	ck('crKeyFile', crd.keyFile); // 作成時に鍵組+署名が OPFS keys/<rid>.json へ保存
