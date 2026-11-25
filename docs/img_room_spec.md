@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.34
+- ステータス: ドラフト v2.35
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1714,3 +1714,20 @@ D) QR PNG 復号: アプリ QRTool で生成した `TMIWR1:` QR を canvas→jsQ
 - 検証（probe・日モード）: 4 枚 1 行のセクション h=124（26+72+26）、サムネイル下余白 36px（=間隔 26 + 行内余り 8）。remline: checkbox 13×13・文言と top 差 4px・背景適用。
 - i18n: `lbl.cr.role`（ja 部屋作成者/en Room creator）、`lbl.key.delegate`（ja 部屋作者の移譲/en Room creator transfer）追加（ja/en 208/208 維持）。
 - 教訓: ①登录画面は**部屋作成ボタンから作成フォーム（ir-cn/ir-cuid/ir-cpw）**へ進む導線（join 画面のログインだけだと新名は auth.fail）。②可変高さ導入時は**アプリ内の固定 pg 前提（jumpToDay 等）を全数洗い出す**。③CSS 背景は既存高特定度規則（`.ir-frm .ir-remline`）に書く。
+
+
+## §62（v2.35 追加）: ログインフォームの欄ラベル・移譲ラベル正しい表記・QR ボタン高さ・モード/ミラー文言
+
+### 要求
+- ログインフォームの入力欄の**左上に小さなラベル**を追加。
+- 文言「部屋作者の移謠」→**「部屋作成者の移譲」**。
+- **QR スキャンボタンをログインボタンと同じ高さ**に。
+- 文言「モード」→**「データ取得モード」**。
+- 文言「この部屋には既に参加しています（ミラータブとして表示） uid: ponta」→**「この部屋には既に一度参加しています…」**。
+
+### 実装
+- **欄ラベル**: join フォームの各入力直前に `span.ir-flbl`（.74em・グレー・`margin-bottom:-4px` で欄に密着）。文言は既存 i18n（部屋名/ユーザー名/パスワード）。`fldLbls` 検査=ラベルが対応入力の子の直前 sibling・左上位置。
+- **移譲ラベル**: `lbl.key.delegate`（ja）を「部屋作成者の移譲」に（v2.34 で「部屋作者の移謠」の誤字が混入していた経緯もこれで解消）。**ラベル独行化**（`.ir-keylbl{flex-basis:100%}`）— 表記長化で鍵 2 ボタンが wrap 分離、**2 ボタン同一行**を deterministically 保証。
+- **QR 高さ**: ログイン行に `ir-loginrow` クラス、CSS `.ir-loginrow .ir-btn:not(.ir-bigbtn){align-self:stretch}` で QR スキャンがログイン（bigbtn）と同一高さ。`qrBtnH` 検査（高さ差≤2）。
+- **文言**: `lbl.mode`=データ取得モード（en 'Data fetch mode'）、`msg.session.mirror`=…既に**一度**参加しています…（en 'Already joined this room once…'）。テスト 'モード: normal'（診断行）は部分一致で継続 green。
+- 教訓: 文言長変更は flex-wrap 行の崩れ源。**同一行要求の要素間には label flex-basis:100% など決定的な組分け**を置く。

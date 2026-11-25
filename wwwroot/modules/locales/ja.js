@@ -20,7 +20,7 @@ export default {
 	'btn.srv.toggle': 'サーバーモード切替',
 	'lbl.username': 'ユーザー名',
 	'lbl.password': 'パスワード',
-	'lbl.mode': 'モード',
+	'lbl.mode': 'データ取得モード',
 	'btn.cal.day': '日', // §5.5 カレンダーモード切替（room_calendar）
 	'btn.cal.week': '週',
 	'btn.cal.month': '月',
@@ -74,7 +74,7 @@ export default {
 	'msg.ts.corrected': '不正な受信時刻（未来 ts）を補正しました', // §12 不正時刻
 	'msg.uid.renamed': 'ユーザー ID が衝突したため {uid} に変更しました', // §12 同一 userId 衝突
 	'msg.sync.vanished': '同期対象が消滅したため取得を取り消しました', // §12 同期対象の消滅
-	'msg.session.mirror': 'この部屋には既に参加しています（ミラータブとして表示）', // §9.12 重複ログイン
+	'msg.session.mirror': 'この部屋には既に一度参加しています（ミラータブとして表示）', // §9.12 重複ログイン
 	'msg.srv.kicked': 'サーバーモードが無効になったためログアウトしました', // §12 サーバー参加中に srvOn=false
 	// ---- room_app.js 追加キー（§5 UI 用・実装報告に記載）----
 	'lbl.room.list': '登録済み部屋', // §5.1 ホーム
@@ -130,7 +130,7 @@ export default {
 	'lbl.room.imgs': '{n} 枚',
 	'lbl.cr': '作成者:',
 	'lbl.cr.role': '部屋作成者',
-	'lbl.key.delegate': '部屋作者の移謠',
+	'lbl.key.delegate': '部屋作成者の移譲',
 	'lbl.cr.ok': '（署名一致）',
 	'lbl.cr.self': '（本人・署名一致）',
 	'lbl.cr.bad': '（署名不一致）',

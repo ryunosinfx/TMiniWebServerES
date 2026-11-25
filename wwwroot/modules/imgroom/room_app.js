@@ -703,6 +703,7 @@ export class RoomApp {
 		Vw.rc(this.main);
 		const f = Vw.add(this.main, 'form', { class: 'ir-frm' }); // v2.15 §42: 実 form（ブラウザパスワードマネージャ検知）
 		Vw.add(f, 'h3').textContent = t('btn.login');
+		Vw.add(f, 'span', { class: 'ir-flbl', text: t('lbl.room.name') }); // v2.35 §62: 入力欄左上の小さなラベル（ログインフォーム）
 		const nmIn = Vw.ipt(f, { type: 'text', name: 'ir-nm', placeholder: t('lbl.room.name'), autocomplete: 'off' });
 		if (room && room.nm) nmIn.value = RoomApp.unB64(room.nm) || room.nm;
 		else if (preNb) nmIn.value = RoomApp.unB64(preNb);
@@ -710,6 +711,7 @@ export class RoomApp {
 			const ll = RoomApp.rememberOn() ? RoomApp.lastLogin() : null;
 			if (ll && ll.nm) nmIn.value = ll.nm;
 		}
+		Vw.add(f, 'span', { class: 'ir-flbl', text: t('lbl.username') }); // v2.35 §62
 		const uidIn = Vw.ipt(f, { type: 'text', name: 'ir-uid', placeholder: t('lbl.username'), autocomplete: 'username' }); // v2.15 §42
 		const rl = rid && AppSettings.state && (AppSettings.state.roomLogin || {})[rid];
 		if (rl) uidIn.value = rl.uid || '';
@@ -717,6 +719,7 @@ export class RoomApp {
 			const ll = RoomApp.rememberOn() ? RoomApp.lastLogin() : null;
 			if (ll && ll.uid) uidIn.value = ll.uid;
 		}
+		Vw.add(f, 'span', { class: 'ir-flbl', text: t('lbl.password') }); // v2.35 §62
 		const pwIn = Vw.ipt(f, { type: 'password', name: 'ir-pw', placeholder: t('lbl.password'), autocomplete: 'current-password' }); // v2.15 §42
 		Vw.add(f, 'div', { class: 'ir-mut' }).textContent = t('diag.origin') + ': ' + location.origin; // v2.8 §34: 参加側のオリジン表示（作成者に oa 登録してもらうため）
 		{ // v2.20 §47: URL/QR アンカーの作成者クレームをログイン画面で検証して表示（一致なら作成者名が分かる）
@@ -778,7 +781,7 @@ export class RoomApp {
 		for (const m of Object.keys(radios)) Vw.ael(radios[m], 'change', paintSay);
 		applySel((room && room.nm) || preNb || this.pendingNb || (nmIn.value.trim() ? RoomApp.nb(nmIn.value.trim()) : ''));
 		Vw.ael(nmIn, 'input', () => applySel(RoomApp.nb(nmIn.value.trim()) || '')); // 部屋名入力に追従
-		const row = Vw.div(f, { class: 'ir-row' });
+		const row = Vw.div(f, { class: 'ir-row ir-loginrow' }); // v2.35 §62: QR スキャンをログインと同じ高さへ
 		const go = Vw.btn(row, { class: 'ir-btn ir-bigbtn', type: 'button' }); // v2.15 §42 / v2.30 §57: ログイン拡大+明色 type=button + form submit で Enter 対応
 		Vw.sT(go, t('btn.login'));
 		{ // v2.23 §50: 作成者秘密鍵ファイル（添付してログイン→移譲取得）。

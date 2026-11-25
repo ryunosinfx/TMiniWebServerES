@@ -439,7 +439,23 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 	const st1 = await K1.evaluate(() => { const b = document.querySelector('.ir-frm button.ir-bigbtn'); if (!b) return null; const s = getComputedStyle(b); return { fs: s.fontSize, bg: s.backgroundColor }; });
 	ck('bigLoginBtn', !!st1 && parseFloat(st1.fs) >= 21 && st1.bg.includes('74, 158, 255'), JSON.stringify(st1));
 	// v2.34 §61: 「部屋作者の移譲」行（鍵を選ぶ＋秘密鍵の移動が同一行・濃背景）と記憶行（同一行・薄背景）
-	ck('keyRowLine', await K1.evaluate(() => { const bs = [...document.querySelectorAll('.ir-keyrow button')]; if (bs.length < 2) return false; const t0 = bs[0].getBoundingClientRect().top; const lb = document.querySelector('.ir-keyrow .ir-keylbl'); const dark = bs.every(x => { const c = getComputedStyle(x).backgroundColor; return c !== 'rgba(0, 0, 0, 0)' && c !== 'rgb(32, 39, 54)'; }); return bs.every(x => Math.abs(x.getBoundingClientRect().top - t0) < 6) && !!lb && (lb.textContent || '').includes('部屋作者の移謠') && dark; }));
+	ck('keyRowLine', await K1.evaluate(() => { const bs = [...document.querySelectorAll('.ir-keyrow button')]; if (bs.length < 2) return false; const t0 = bs[0].getBoundingClientRect().top; const lb = document.querySelector('.ir-keyrow .ir-keylbl'); const dark = bs.every(x => { const c = getComputedStyle(x).backgroundColor; return c !== 'rgba(0, 0, 0, 0)' && c !== 'rgb(32, 39, 54)'; }); return bs.every(x => Math.abs(x.getBoundingClientRect().top - t0) < 6) && !!lb && (lb.textContent || '').includes('部屋作成者の移譲') && dark; }));
+	ck('fldLbls', await K1.evaluate(() => {
+		const want = { 'ir-nm': '部屋名', 'ir-uid': 'ユーザー名', 'ir-pw': 'パスワード' }; // v2.35 §62: 入力欄左上の小さなラベル
+		return Object.entries(want).every(([n, txt]) => {
+			const inp = document.querySelector('.ir-frm input[name="' + n + '"]');
+			if (!inp) return false;
+			const p = inp.previousElementSibling;
+			if (!p || !p.classList.contains('ir-flbl') || !(p.textContent || '').includes(txt)) return false;
+			const ra = p.getBoundingClientRect(), rb = inp.getBoundingClientRect();
+			return ra.top < rb.top && rb.top - ra.bottom < 12 && Math.abs(ra.left - rb.left) < 4;
+		});
+	}));
+	ck('qrBtnH', await K1.evaluate(() => {
+		const g = document.querySelector('.ir-loginrow .ir-bigbtn'), q = document.querySelector('.ir-loginrow .ir-btn:not(.ir-bigbtn)'); // v2.35 §62: QR スキャンボタンはログインボタンと同じ高さ
+		if (!g || !q) return false;
+		return Math.abs(g.getBoundingClientRect().height - q.getBoundingClientRect().height) <= 2;
+	}));
 	ck('remRow', await K1.evaluate(() => { const lb = document.querySelector('label.ir-remline'); if (!lb) return false; const i0 = lb.querySelector('input[type=checkbox]'), sp = lb.querySelector('span'); if (!i0 || !sp) return false; const ra = i0.getBoundingClientRect(), rb = sp.getBoundingClientRect(); return Math.abs(ra.top - rb.top) < 12 && getComputedStyle(lb).backgroundColor !== 'rgba(0, 0, 0, 0)'; }));
 	const kmvBox = await K1.evaluate(() => { const k = document.querySelector('.ir-keyrow .ir-keymv'); const f = document.querySelector('.ir-frm'); if (!k || !f) return null; const kr = k.getBoundingClientRect(), fr = f.getBoundingClientRect(); return kr.left + kr.width / 2 > fr.left + fr.width * 0.5 && kr.bottom > fr.top + fr.height * 0.6; });
 	ck('keyMvBottomRight', !!kmvBox);

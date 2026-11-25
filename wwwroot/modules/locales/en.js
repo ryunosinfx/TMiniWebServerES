@@ -20,7 +20,7 @@ export default {
 	'btn.srv.toggle': 'Toggle server mode',
 	'lbl.username': 'Username',
 	'lbl.password': 'Password',
-	'lbl.mode': 'Mode',
+	'lbl.mode': 'Data fetch mode',
 	'btn.cal.day': 'Day', // §5.5 calendar mode toggle (room_calendar)
 	'btn.cal.week': 'Week',
 	'btn.cal.month': 'Month',
@@ -74,7 +74,7 @@ export default {
 	'msg.ts.corrected': 'Corrected an invalid future timestamp',
 	'msg.uid.renamed': 'User ID conflict: renamed to {uid}',
 	'msg.sync.vanished': 'Sync target disappeared; fetch canceled',
-	'msg.session.mirror': 'Already in this room (shown as a mirror tab)',
+	'msg.session.mirror': 'Already joined this room once (shown as a mirror tab)',
 	'msg.srv.kicked': 'Logged out: server mode was turned off',
 	// ---- room_app.js additions (UI §5; see implementation report) ----
 	'lbl.room.list': 'Saved rooms',

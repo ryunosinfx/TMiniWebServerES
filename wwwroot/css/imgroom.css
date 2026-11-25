@@ -147,6 +147,15 @@ body {
 	gap: 10px;
 	max-width: 560px;
 }
+.ir-flbl {
+	/* v2.35 §62: ログインフォーム入力欄左上の小さなラベル */
+	font-size: .74em;
+	color: var(--ir-mut);
+	margin-bottom: -4px;
+}
+.ir-loginrow .ir-btn:not(.ir-bigbtn) {
+	align-self: stretch; /* v2.35 §62: QR スキャンボタンをログインボタンと同じ高さへ */
+}
 .ir-frm label {
 	display: flex;
 	flex-direction: column;
@@ -972,7 +981,7 @@ input[type="file"]:active::file-selector-button {
 .ir-ptm { display: none; margin-left: 5px; padding: 1px 6px; border-radius: 4px; background: #33507e; color: #cfe3ff; font-size: .82em; white-space: nowrap; }
 .ir-pbadge.showt .ir-ptm { display: inline-block; }
 .ir-keyrow { flex-wrap: wrap; align-items: center; gap: 8px; }
-.ir-keylbl { color: #cfd8e6; font-weight: 600; margin-right: auto; }
+.ir-keylbl { color: #cfd8e6; font-weight: 600; flex-basis: 100%; margin-right: 0; } /* v2.35 §62: ラベルは独行、二つの鍵ボタンを必ず同一行に揃える */
 .ir-keybtn { background: #2f6fb8; border-color: #245a97; color: #fff; font-weight: 600; }
 .ir-keybtn:hover { background: #3f82d0; }
 .ir-remline { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,.07); border-radius: 6px; padding: 6px 8px; }
