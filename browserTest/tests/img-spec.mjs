@@ -91,7 +91,7 @@ process.on('exit', () => console.log('PARTIAL-FAILS:', Object.keys(checks).filte
 		const fit = await L1.evaluate(() => {
 			const cs = [...document.querySelectorAll('.cal-cell.cal-list')].filter(c => c.offsetHeight > 0);
 			const det = cs.map(c => { const rows = c.querySelectorAll('.ir-lrow').length; const gap = c.offsetHeight - (26 + 10 + 4 + rows * 96); return { rows, h: c.offsetHeight, gap }; });
-			return { pass: det.length > 0 && det.every(x => x.gap >= 40 && x.gap <= 56), det };
+			return { pass: det.length > 0 && det.every(x => x.gap >= 20 && x.gap <= 34), det }; // v2.34 §61: 節間隔=ヘッダー行高さ（26px）
 		});
 		ck('l51SecFit', fit.pass, JSON.stringify(fit.det).slice(0, 200));
 	}
@@ -1742,7 +1742,7 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 			btns = [...document.querySelectorAll('.ir-pick .ir-pickday')];
 		for (const el of btns) {
 			const i = cvv.secIdxOfDay(+el.dataset.k);
-			if (i >= 0 && Math.abs(cvv.box.scrollTop - i * cvv.vl.pg) > 4) return el.dataset.k;
+			if (i >= 0 && Math.abs(cvv.box.scrollTop - (cvv.vl._off ? cvv.vl._off[i] : i * cvv.vl.pg)) > 4) return el.dataset.k; // v2.34 §61: 可変高さの累積オフセット基準
 		}
 		return '';
 	});
@@ -1765,9 +1765,9 @@ ck('pwqrOff', await A.locator('.ir-sec .ir-secret').count() === 0);
 			const c = window.__IRAPP.activeCtx(),
 				cvv = c.cal.cal,
 				i = cvv.secIdxOfDay(+k),
-				pg = cvv.vl.pg,
+				off = cvv.vl._off ? cvv.vl._off[i] : i * (cvv.vl.pg || 0), // v2.34 §61: 可変高さでは _off 基準
 				st = cvv.box.scrollTop || Math.max(0, -cvv.box.getBoundingClientRect().top); // 両レイアウト共通の実効スクロール量
-			return i >= 0 && Math.abs(st - i * pg) <= 2 && st > 0; // 該当セクションの top が最上段（実際に動かす）
+			return i >= 0 && Math.abs(st - off) <= 2 && st > 0; // 該当セクションの top が最上段（実際に動かす）
 		}, dk));
 		ck('pickHeaderTop', await B.evaluate(k => {
 			const c = window.__IRAPP.activeCtx(),

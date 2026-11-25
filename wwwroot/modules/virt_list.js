@@ -113,8 +113,9 @@ export class VirtList {
 		}
 		const mx = n - 1; // 最終ページ（アイテム総数 = ページ総数）
 		let cur;
+		let visF = 0, visH = 844; // v2.34 §61: 可視範囲（最先頭ページ/高さ）— 窓の前方下限用
 		const st = (this.ct && this.ct.scrollTop) || 0;
-		if (st) cur = this.pageAt(st);
+		if (st) { cur = this.pageAt(st); visF = cur; visH = (this.ct && this.ct.clientHeight) || visH; }
 		else {
 			// v1.5 §19: 容器が高さ非拘束（spacer が箱を伸長させページ全体がスクロールする）レイアウトでは
 			// scrollTop が常に 0 で窓が進まない。箱の viewport 上位置（rect.top の負方向）から現在ページを求める
@@ -124,6 +125,8 @@ export class VirtList {
 				const vh = (this.ct && this.ct.ownerDocument && this.ct.ownerDocument.documentElement.clientHeight) || 844,
 					first = this.pageAt(Math.max(0, -r.top)),
 					last = this.pageAt(Math.max(0, vh - r.top));
+				visF = first;
+				visH = vh;
 				cur = Math.max(first, last - Math.floor(this.wp / 2));
 			} else cur = 0;
 		}
@@ -135,9 +138,11 @@ export class VirtList {
 		if (lo < 0) hi += -lo; // 先頭端: 窓幅を削らず前に寄せる
 		hi = Math.min(hi, mx);
 		if (this.pgFn) {
-			// 可変高さ: セクションが低くても窓がビューポート高を覆い切るまで後ろへ延ばす（下端の取りこぼし防止）
-			const vh = (this.ct && this.ct.ownerDocument && this.ct.ownerDocument.documentElement.clientHeight) || 844;
-			while (hi < mx && this._off[hi + 1] - this._off[cur] < vh + 50) hi++;
+			// 可変高さ: セクションが低くても窓がビューポート高を覆い切るまで後ろへ延ばす（下端の取りこぼし防止）。
+			// v2.34 §61: 前方も最先頭可視ページ（visF）まで確実に覆う — セクション低めのとき
+			// cur 基準の窓幅だと可視の上側ページが未マウントになる（img-sec scanAllSlots で露見）
+			if (lo > visF) lo = visF;
+			while (hi < mx && this._off[hi + 1] - this._off[lo] < visH + 50) hi++;
 		}
 		lo = Math.min(Math.max(lo, 0), hi);
 		if (lo === this.lo && hi === this.hi) return; // 窓端を跨いでいない: 窓は進めない

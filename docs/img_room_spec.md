@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.33
+- ステータス: ドラフト v2.34
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1692,3 +1692,25 @@ D) QR PNG 復号: アプリ QRTool で生成した `TMIWR1:` QR を canvas→jsQ
   - **空アンカー单元の除去**: buildSec は今日/単位アンカーの空单元を追加していたが、list では「見出し+全高空白」の幽霊セクション（＝ユーザー観測の 1 個分空白の主因）になっていた。list モードでは `v.length===0` の单元を除外。
 - テスト（img-spec）: §51 に **l51SecFit**（各 list セクションの枠高−(ヘッダ+実行×96) が 48±8px）を追加＝可変高さ+0.5 行の回帰固定。§57 は **crSubShown/crBadgeInParts/crInfoGoneK1**（作成者行・👑・バッジ廃止）と **badgeRemovedK2/crSubShownK2/crBadgeInPartsK2**（別端末参加視点）に更新。v1.1 の joinTimes・v2.20 の crBadgeHdr は新装飾/新表示に合わせて修正（バッジ textContent 検査は `S`/`👑` を除去して比較）。
 - 教訓: ①JS の `\U0001F451` は無効エスケープで**リテラル 'U0001F451' 文字列**になる（emoji は `\u{1F451}` か直書き。python r-string 経由のパッチで `\U` を混ぜるとテスト text 検査で発覚）。②可変高さ化は**窓の被覆長**（低セクションで窓が足りず下端が消える）と**セクション枠高さの再適用**（+N 展開）が必須。③仮想リストの幽霊空セクションは固定高さでは目立たず、実件数高さで初めて空白として可視化する。
+
+
+## §61（v2.34 追加）: 作成者表記をタブへ・参加者バッジの時刻トグル・鍵行と記憶行の登录画面レイアウト・グリッドの実行数高さ（節間隔=ヘッダー行高さ）
+
+### 要求
+- 「作成者 xxx」表記は**部屋のタブの部屋名の下**に持っていく（v2.33 のヘッダー行は廃止）。
+- **参加者バッジをクリックするとバッジ内に参加時刻**を違う背景色で表示、再クリックで元に戻す。
+- 作成者マークがある参加者は**「部屋作成者」も時刻と共に**表示。
+- 登录画面の**鍵ファイルを選ぶボタンは秘密鍵の移動ボタンと同じ行**に。2 ボタンは**濃いめ背景**で特別感。行ラベルは**「部屋作者の移譲」**。
+- 登录画面の**最終ログイン部屋＋ログイン名の記憶チェックは同じ行**に収め、**行背景をほんの少し明るく**。
+- （確認）依然**サムネイルの後にサムネイル 1 行分の空行**が出ている。この空行を**ヘッダー行の高さ**に改める。
+
+### 実装
+- **タブ作成者行**: `renderTabs` が `span.ir-tabt`（flex column）に部屋名＋`span.ir-tabcr`（.72em グレー）「作成者: xxx」を重ねる。`paintCr` は `renderTabs()` 呼び出しのみ（mkShell の `.ir-crsub` は削除）。
+- **バッジ時刻トグル**: `paintParts` に `span.ir-ptm`（`toLocaleString()` ＋ 作成者には ` · 部屋作成者`、i18n `lbl.cr.role`）を追加。バッジ click で `.showt` クラス切替、CSS で `.ir-ptm` は既定非表示・`.showt` 時 `display:inline-block`＋`background:#33507e`。
+- **鍵行**: 提出行の下に `div.ir-keyrow`（ラベル `lbl.key.delegate`=「部屋作者の移譲」＋`鍵ファイルを選ぶ`＋`秘密鍵の移動`）。両ボタン `.ir-keybtn`（`#2f6fb8` 系・太字）で同一行（`keyRowLine` 検査）。
+- **記憶行**: `label.ir-remline`。`flex-direction:row`（`.ir-frm label` の column 既定を上書き）＋ checkbox に `min-height:0; padding:0`（共通 `min-height:42px` で 13×42 化していた）で**同一行化**。行背景 `rgba(255,255,255,.07)`（`.ir-frm .ir-remline` の高特定度規則に入れる必要あり）。
+- **グリッド（日/週/月）の実行数高さ**: `secPx(i)` を list 専用から全モード化 — `HH + ceil(実表示/列) × (ts+8) + HH(節間隔=ヘッダー行高さ) + (+N 時 24)`。**list の節間隔も 0.5lrh→HH** に統一（v2.33 の 0.5 行要求をヘッダー行高さに改める）。`vl.page` は全モード `i => secPx(i)`。`jumpToDay` は `vl._off[i]` 基準（固定 `i*pg` だと可変高さで誤着地 — pickJumpTop/pickHeaderTop で露見）。テスト `l51SecFit` 間隔 48±8→26±8、pick 系 2 検査は `_off` 基準へ。
+- **VirtList 窓の前方覆い（img-sec scanAllSlots で露見）**: 低セクション×高ビューポートで `cur = max(first, last−⌊wp/2⌋)` だと窓 `[cur−h … ]` が最先頭可視ページ `first` を覆わず、画面上見えるページが未マウントになった。pgFn 時に ①`lo = min(lo, visF)`（コンテナ/ページ両スクロール様式の最先頭可視ページ）②後方延長の基準を `cur`→`lo`（`_off[hi+1]−_off[lo] < visH+50`）へ変更。
+- 検証（probe・日モード）: 4 枚 1 行のセクション h=124（26+72+26）、サムネイル下余白 36px（=間隔 26 + 行内余り 8）。remline: checkbox 13×13・文言と top 差 4px・背景適用。
+- i18n: `lbl.cr.role`（ja 部屋作成者/en Room creator）、`lbl.key.delegate`（ja 部屋作者の移譲/en Room creator transfer）追加（ja/en 208/208 維持）。
+- 教訓: ①登录画面は**部屋作成ボタンから作成フォーム（ir-cn/ir-cuid/ir-cpw）**へ進む導線（join 画面のログインだけだと新名は auth.fail）。②可変高さ導入時は**アプリ内の固定 pg 前提（jumpToDay 等）を全数洗い出す**。③CSS 背景は既存高特定度規則（`.ir-frm .ir-remline`）に書く。

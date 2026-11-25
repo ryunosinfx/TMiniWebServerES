@@ -907,6 +907,7 @@ input[type="file"]:active::file-selector-button {
 }
 .ir-frm .ir-remline {
 	display: flex;
+	flex-direction: row; /* v2.34 §61: ラベル column 既定を上書きしチェックと文言を同一行に */
 	align-items: center;
 	gap: 6px;
 	margin: 6px 0;
@@ -915,6 +916,16 @@ input[type="file"]:active::file-selector-button {
 	background: rgba(255, 255, 255, .07);
 	border-radius: 6px;
 	padding: 6px 8px;
+}
+.ir-frm .ir-remline input[type="checkbox"] {
+	width: auto;
+	height: auto;
+	min-height: 0; /* v2.34 §61: min-height:42px（L165）で checkbox が 13x42 化しないよう解除 */
+	padding: 0;
+	margin: 0;
+	border: 0;
+	background: transparent;
+	border-radius: 0;
 }
 
 /* ==== v2.24 §51: リスト表示モード / トグルスイッチ / タグバッジ ==== */
