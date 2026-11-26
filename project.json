@@ -1,0 +1,10 @@
+{
+	"name": "tminiwebserveres",
+	"version": "1.0.0",
+	"description": "Project scripts (canonical sources remain the split files; these generate derived bundles)",
+	"scripts": {
+		"imgone": "node tools/imgroom_one.mjs",
+		"imgallinone": "node tools/imgroom_allinone.mjs",
+		"imgbuild": "node tools/imgroom_one.mjs && node tools/imgroom_allinone.mjs"
+	}
+}

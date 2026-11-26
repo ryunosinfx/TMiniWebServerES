@@ -46,7 +46,8 @@ export default {
 	'msg.share.over': '"{name}" ({mb}MB) exceeds the limit ({lim}MB).\nShare a converted copy (downscaled to max 4096px, re-encoded as JPEG)?\n(Formats that cannot be decoded, or sizes over the memory limit, are rejected before conversion.)',
 	'msg.hiber.ok': 'Page reloaded after long uptime. Auto rejoin complete',
 	'msg.hiber.fail': 'Auto rejoin failed. Please log in again',
-	'msg.share.ok': 'Shared',
+		'msg.dup': 'Already registered.', // v2.36 §63
+'msg.share.ok': 'Shared',
 	'lbl.trash.empty': 'Trash is empty',
 	'btn.trash.purge': 'Delete forever',
 	'btn.trash.empty': 'Empty trash',

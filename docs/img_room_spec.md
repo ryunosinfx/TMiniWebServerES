@@ -1,6 +1,6 @@
 # ImageRoom（画像交換ルーム）仕様書
 
-- ステータス: ドラフト v2.35
+- ステータス: ドラフト v2.36
 - 日付: 2026-11-10
 - 改訂履歴:
   - v1.4: 追加仕様「大きな画像・形式ポリシー」（§17）: 上限超（既定 10MB）画像は JPEG 縮小変換での共有を確認、ブラウザ非対応形式と 256MB 超確実サイズは確認前にお断り
@@ -1731,3 +1731,24 @@ D) QR PNG 復号: アプリ QRTool で生成した `TMIWR1:` QR を canvas→jsQ
 - **QR 高さ**: ログイン行に `ir-loginrow` クラス、CSS `.ir-loginrow .ir-btn:not(.ir-bigbtn){align-self:stretch}` で QR スキャンがログイン（bigbtn）と同一高さ。`qrBtnH` 検査（高さ差≤2）。
 - **文言**: `lbl.mode`=データ取得モード（en 'Data fetch mode'）、`msg.session.mirror`=…既に**一度**参加しています…（en 'Already joined this room once…'）。テスト 'モード: normal'（診断行）は部分一致で継続 green。
 - 教訓: 文言長変更は flex-wrap 行の崩れ源。**同一行要求の要素間には label flex-basis:100% など決定的な組分け**を置く。
+
+
+## §63（v2.36 追加）: 重複投稿の注意表示・単一 JS/単一 HTML ビルド
+
+### 要求
+- 既に登録済みの画像をアップロードしたら「これはすでに登録済みです。」といい、サムネイルが表示されている場合は約 3 秒 CSS で彩度を上げ下げ点滅させる。
+- 1 個の JS に統合するスクリプトを追加し `project.json` に記載して呼び出せるようにする（Terser で minify しているとなお良い）。
+- その 1 個版 JS を呼ぶ HTML を別途作成する。
+- CSS と JS を含むまるまる 1 個の HTML を作成するスクリプトも作成する。
+- ただし現状の分割ファイルが飽くまでも正となるようにする。
+
+### 実装
+- **重複検出**: `collection.share()` の `newEntry=false`（同一 `h10` が本部屋 manifest に既存）で判定。`room_app` アップロードループで `Toast(t('msg.dup'))`＋`document.querySelectorAll('.ir-thumb[data-h10="…"]')` に `ir-dup` を 3.2 秒付与。CSS `@keyframes ir-dupblink`（`filter: saturate(1)↔2.6`, .55s×6≒3.3 秒）。i18n `msg.dup`（ja: これはすでに登録済みです。/ en: Already registered.）。
+- **ビルド**（正は分割ファイル、`wwwroot/one/` 配下は派生物＝再生成前提）:
+  - `tools/imgroom_bundle_lib.mjs`: rollup（ESM 1 個・`inlineDynamicImports`）+ terser minify（250KB 級）。
+  - `tools/imgroom_one.mjs`: `wwwroot/one/imgroom.one.js` + `wwwroot/one/img_room_one.html`（`./imgroom.one.js` を読むだけ）を生成。
+  - `tools/imgroom_allinone.mjs`: `wwwroot/one/img_room_allinone.html`（CSS `<style>` 展開 + バンドル `<script>` インライン）。
+  - 依存は `tools/deps/` に隔離インストール（terser/rollup。ルート package.json の kaluma/rollup ネイティブビルド失敗を回避）。`npm i` が `~/.npm` の root 所有ファイルで EACCES になるため `--cache ./.npm-cache` を使う。
+  - `project.json` に `imgone/imgallinone/imgbuild` を記載（ルート `package.json` scripts にも同名）。
+- 検査（img-spec）: `dupToast`/`dupBlink`（`ir-thumb.ir-dup` ≥1・`animation-name: ir-dupblink`）/`dupBlinkEnd`（3.5 秒後に消滅）。単一版の起動確認はスモーク（pageerror ゼロ・部屋作成成功・dup 表示）で担保。
+- 教訓: `input[type=file]` はログイン画面だと常時出現すると「部屋が開いた」判定と衝突するが、ルーム画面では単一。単一 HTML 版では `input[name="ir-cn"]` の ir-cpw が自動生成パスワードで埋まっているので `fill` で上書きする。

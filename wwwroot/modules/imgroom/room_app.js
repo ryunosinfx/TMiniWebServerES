@@ -1680,7 +1680,13 @@ export class RoomApp {
 					const r = await ctx.collection.share(use, { name: use.name, mime: use.type, defer: true }); // 一括: manifest 保存は末尾 1 回
 					if (r.error === 'tooBig') Toast(t('msg.share.tooBig', { limit: Math.round((+ctx.room.mx > 0 ? +ctx.room.mx : this.cfg.MAX_IMG_BYTES) / 1048576) })); // §11 上限（部屋 mx）
 					else if (r.error) Toast(t('msg.share.fail'));
-					else {
+					else if (!r.newEntry) { // v2.36 §63: 既に登録済み（同一部屋に再投稿）→ 注意報示 + サムネ 3 秒間志さプ点滅
+						Toast(t('msg.dup'));
+						for (const th of document.querySelectorAll('.ir-thumb[data-h10="' + r.h10 + '"]')) {
+							th.classList.add('ir-dup');
+							setTimeout(() => th.classList.remove('ir-dup'), 3200);
+						}
+					} else {
 						shared++;
 						try {
 							ctx.sheet.setThumb(r.h10, await ImgProc.thumb(use, this.cfg.THUMB_BASE_PX || 128)); // §9.2 コマ（v1.6 §20: 基準 128 contain）

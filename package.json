@@ -30,7 +30,10 @@
 		"flash": "kaluma flash bundle.js",
 		"build": "rollup ./TMiniWebServerES/main.js --file bundle.js -f cjs",
 		"buildSample": "rollup ./TMiniWebServerES/SampleServer.js --file bundleSample.cjs -f cjs",
-		"build_flash": "rollup ./TMiniWebServerES/main.js --file bundle.js -f cjs;kaluma flash bundle.js"
+		"build_flash": "rollup ./TMiniWebServerES/main.js --file bundle.js -f cjs;kaluma flash bundle.js",
+		"imgone": "node tools/imgroom_one.mjs",
+		"imgallinone": "node tools/imgroom_allinone.mjs",
+		"imgbuild": "node tools/imgroom_one.mjs && node tools/imgroom_allinone.mjs"
 	},
 	"devDependencies": {
 		"@kaluma/cli": "^1.4.0",

@@ -16,3 +16,4 @@ browserTest/out/
 browserTest/tests/err*.log
 .tmp/
 *.log
+tools/deps/node_modules/

@@ -46,7 +46,8 @@ export default {
 	'msg.share.over': '「{name}」({mb}MB) は上限 ({lim}MB) を超えています。\n長辺 4096px 以内への縮小と JPEG 再圧縮による変換共有をおこないませんか？\n（デコードできない形式や、メモリ上限を超える大きさは変換前にお断りします）',
 	'msg.hiber.ok': '長時間動作のためページを再読み込みしました。自動再参加しました',
 	'msg.hiber.fail': '自動再参加に失敗しました。ログインし直してください',
-	'msg.share.ok': '共有しました',
+		'msg.dup': 'これはすでに登録済みです。', // v2.36 §63: 同一部屋への再投稿
+'msg.share.ok': '共有しました',
 	'lbl.trash.empty': 'ゴミ箱は空です',
 	'btn.trash.purge': '完全に削除',
 	'btn.trash.empty': 'ゴミ箱を空にする',

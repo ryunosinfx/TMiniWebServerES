@@ -153,6 +153,13 @@ body {
 	color: var(--ir-mut);
 	margin-bottom: -4px;
 }
+@keyframes ir-dupblink {
+	0%, 100% { filter: saturate(1); }
+	50% { filter: saturate(2.6); }
+}
+.ir-thumb.ir-dup {
+	animation: ir-dupblink .55s ease-in-out 6; /* v2.36 §63: 既登録サムネを約 3 秒取り戻して志さ点滅 */
+}
 .ir-loginrow .ir-btn:not(.ir-bigbtn) {
 	align-self: stretch; /* v2.35 §62: QR スキャンボタンをログインボタンと同じ高さへ */
 }

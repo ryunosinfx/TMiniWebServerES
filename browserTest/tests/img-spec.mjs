@@ -647,6 +647,13 @@ const bAfter = await B.evaluate(() => {
 	return { n: c.collection.metas.size, has: [...c.collection.metas.values()].some(x => window.__IRAPP.constructor.unB64(x.n) === 'big.jpg') };
 });
 ck('over10Declined', bAfter.n === bMetas0 && !bAfter.has, JSON.stringify(bAfter));
+	// v2.36 §63: 同一画像の再投稿 → 「これはすでに登録済みです。」+ サムネイル約 3 秒の彩度点滅
+	await A.setInputFiles('input[type=file]', { name: 'sakura-again.jpg', mimeType: 'image/jpeg', buffer: small });
+	await A.waitForFunction(() => [...document.querySelectorAll('.ir-toast')].some(e => e.textContent.includes('\u3053\u308c\u306f\u3059\u3067\u306b\u767b\u9332\u6e08\u307f')), null, { timeout: 15000, polling: 500 }).catch(() => {});
+	ck('dupToast', await A.evaluate(() => [...document.querySelectorAll('.ir-toast')].some(e => e.textContent.includes('\u3053\u308c\u306f\u3059\u3067\u306b\u767b\u9332\u6e08\u307f'))));
+	ck('dupBlink', await A.evaluate(() => document.querySelectorAll('.ir-thumb.ir-dup').length >= 1));
+	await A.waitForTimeout(3500);
+	ck('dupBlinkEnd', await A.evaluate(() => document.querySelectorAll('.ir-thumb.ir-dup').length === 0));
 await shot([B], ['B: 上限超確認ダイアログ（1MB 制限・辞退）'], 'img_spec_4_toolimit.png');
 
 // ---- §17 大きな画像・形式ポリシー（A 部屋 mx=10MB）----
